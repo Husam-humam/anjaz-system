@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from .models import OrganizationUnit
 
@@ -23,13 +24,15 @@ class OrganizationService:
         return unit
 
     @staticmethod
+    @transaction.atomic
     def deactivate_unit(unit):
         """تعطيل كيان تنظيمي (حذف ناعم)"""
+        # قفل السجل لمنع التعارضات المتزامنة
+        unit = OrganizationUnit.objects.select_for_update().get(pk=unit.pk)
         # التحقق من عدم وجود أقسام نشطة تحته
-        active_children = unit.get_children().filter(is_active=True)
-        if active_children.exists():
+        if unit.get_children().filter(is_active=True).exists():
             raise ValidationError(
-                'لا يمكن تعطيل كيان يحتوي على كيانات فرعية نشطة'
+                "لا يمكن تعطيل وحدة لديها وحدات فرعية نشطة"
             )
         unit.is_active = False
         unit.save(update_fields=['is_active'])

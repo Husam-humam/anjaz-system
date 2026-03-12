@@ -67,6 +67,10 @@ class Indicator(models.Model):
         db_table = 'indicators'
         verbose_name = 'مؤشر'
         verbose_name_plural = 'المؤشرات'
+        indexes = [
+            models.Index(fields=['category', 'is_active'], name='idx_indicator_cat_active'),
+            models.Index(fields=['unit_type'], name='idx_indicator_unit_type'),
+        ]
 
     def __str__(self):
         return self.name
@@ -78,6 +82,10 @@ class Indicator(models.Model):
             raise ValidationError({
                 'accumulation_type': 'المؤشرات النصية يجب أن تستخدم طريقة تجميع "آخر قيمة" فقط'
             })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def is_numeric(self):

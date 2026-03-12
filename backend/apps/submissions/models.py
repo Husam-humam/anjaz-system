@@ -33,6 +33,10 @@ class WeeklyPeriod(models.Model):
         verbose_name_plural = 'الفترات الأسبوعية'
         unique_together = ('year', 'week_number')
         ordering = ['-year', '-week_number']
+        indexes = [
+            models.Index(fields=['year', 'week_number'], name='idx_period_year_week'),
+            models.Index(fields=['status'], name='idx_period_status'),
+        ]
 
     def __str__(self):
         return f'الأسبوع {self.week_number} / {self.year}'
@@ -97,23 +101,33 @@ class WeeklySubmission(models.Model):
         verbose_name = 'منجز أسبوعي'
         verbose_name_plural = 'المنجزات الأسبوعية'
         unique_together = ('qism', 'weekly_period')
+        indexes = [
+            models.Index(fields=['qism', 'weekly_period'], name='idx_sub_qism_period'),
+            models.Index(fields=['weekly_period', 'status'], name='idx_sub_period_status'),
+            models.Index(fields=['status'], name='idx_sub_status'),
+        ]
 
     def __str__(self):
         return f'{self.qism.name} - {self.weekly_period}'
 
-    def is_editable(self):
-        """التحقق من إمكانية التعديل"""
+    def is_editable(self, extensions=None):
+        """التحقق من قابلية التعديل"""
+        if self.status not in ('draft', 'returned', 'extended'):
+            return False
+        period = self.weekly_period
+        if period.status != 'open':
+            return False
         now = timezone.now()
-        # التحقق من وجود تمديد
-        extension = QismExtension.objects.filter(
-            qism=self.qism, weekly_period=self.weekly_period
-        ).first()
-        if extension and now <= extension.new_deadline:
+        if now <= period.deadline:
             return True
-        return (
-            self.weekly_period.status == WeeklyPeriod.Status.OPEN
-            and now <= self.weekly_period.deadline
-        )
+        # Check extensions
+        if extensions is not None:
+            return any(ext.new_deadline >= now for ext in extensions)
+        return QismExtension.objects.filter(
+            qism=self.qism,
+            weekly_period=period,
+            new_deadline__gte=now,
+        ).exists()
 
 
 class SubmissionAnswer(models.Model):
@@ -168,6 +182,9 @@ class SubmissionAnswer(models.Model):
         verbose_name = 'إجابة منجز'
         verbose_name_plural = 'إجابات المنجزات'
         unique_together = ('submission', 'form_item')
+        indexes = [
+            models.Index(fields=['submission', 'form_item'], name='idx_answer_sub_item'),
+        ]
 
     def __str__(self):
         return f'{self.submission} - {self.form_item.indicator.name}'

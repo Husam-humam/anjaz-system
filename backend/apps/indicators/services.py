@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from .models import Indicator, IndicatorCategory
 
@@ -25,8 +26,19 @@ class IndicatorService:
         return indicator
 
     @staticmethod
+    @transaction.atomic
     def deactivate_indicator(indicator):
         """تعطيل مؤشر (حذف ناعم)"""
+        # التحقق من عدم استخدام المؤشر في استمارات نشطة
+        from apps.forms.models import FormTemplateItem
+        active_usage = FormTemplateItem.objects.filter(
+            indicator=indicator,
+            form_template__status__in=['approved', 'pending'],
+        ).exists()
+        if active_usage:
+            raise ValidationError(
+                "لا يمكن تعطيل مؤشر مستخدم في استمارات نشطة أو معلقة"
+            )
         indicator.is_active = False
         indicator.save(update_fields=['is_active'])
         return indicator

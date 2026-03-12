@@ -6,11 +6,17 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
 from apps.organization.permissions import IsStatisticsAdmin
+
+
+class LoginThrottle(AnonRateThrottle):
+    """تحديد معدل محاولات تسجيل الدخول"""
+    rate = '5/minute'
 
 from .serializers import (
     LoginSerializer,
@@ -31,6 +37,7 @@ class LoginView(APIView):
     يتحقق من بيانات الاعتماد ويُرجع توكنات JWT مع معلومات المستخدم.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -157,7 +164,12 @@ class UserViewSet(viewsets.ModelViewSet):
         # تصفية حسب الوحدة التنظيمية
         unit_id = self.request.query_params.get('unit_id')
         if unit_id:
-            queryset = queryset.filter(unit_id=unit_id)
+            try:
+                unit_id = int(unit_id)
+            except (ValueError, TypeError):
+                pass  # تجاهل الفلتر غير الصالح
+            else:
+                queryset = queryset.filter(unit_id=unit_id)
         return queryset
 
     def perform_create(self, serializer):

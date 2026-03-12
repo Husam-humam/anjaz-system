@@ -14,7 +14,7 @@ class FormTemplate(models.Model):
         REJECTED = 'rejected', 'مرفوض'
 
     qism = models.ForeignKey(
-        'organization.OrganizationUnit', on_delete=models.CASCADE,
+        'organization.OrganizationUnit', on_delete=models.PROTECT,
         related_name='form_templates',
         verbose_name='القسم'
     )
@@ -56,6 +56,10 @@ class FormTemplate(models.Model):
         verbose_name = 'قالب استمارة'
         verbose_name_plural = 'قوالب الاستمارات'
         unique_together = ('qism', 'version')
+        indexes = [
+            models.Index(fields=['qism', 'status'], name='idx_form_qism_status'),
+            models.Index(fields=['status'], name='idx_form_status'),
+        ]
 
     def __str__(self):
         return f'{self.qism.name} - الإصدار {self.version}'

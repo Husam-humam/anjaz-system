@@ -145,13 +145,29 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         مسموح لمدير قسم الإحصاء فقط
         """
         # التحقق من الصلاحيات
-        if request.user.role != 'statistics_admin':
+        if request.user.role not in ('statistics_admin', 'planning_section'):
             return Response(
                 {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         template = self.get_object()
+
+        # التحقق من نطاق الصلاحية لقسم التخطيط
+        if request.user.role == 'planning_section' and request.user.unit:
+            parent = request.user.unit.parent
+            if parent:
+                allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
+                if template.qism_id not in allowed_ids:
+                    return Response(
+                        {'detail': 'لا تملك صلاحية اعتماد هذه الاستمارة'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                return Response(
+                    {'detail': 'لا يمكن تحديد نطاق صلاحياتك'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         serializer = FormTemplateApproveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -178,13 +194,29 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         مسموح لمدير قسم الإحصاء فقط
         """
         # التحقق من الصلاحيات
-        if request.user.role != 'statistics_admin':
+        if request.user.role not in ('statistics_admin', 'planning_section'):
             return Response(
                 {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         template = self.get_object()
+
+        # التحقق من نطاق الصلاحية لقسم التخطيط
+        if request.user.role == 'planning_section' and request.user.unit:
+            parent = request.user.unit.parent
+            if parent:
+                allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
+                if template.qism_id not in allowed_ids:
+                    return Response(
+                        {'detail': 'لا تملك صلاحية رفض هذه الاستمارة'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                return Response(
+                    {'detail': 'لا يمكن تحديد نطاق صلاحياتك'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         serializer = FormTemplateRejectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

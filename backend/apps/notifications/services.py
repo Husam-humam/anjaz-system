@@ -1,9 +1,12 @@
+import logging
+
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 
 from .models import Notification
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
@@ -69,6 +72,7 @@ class NotificationService:
     def notify_period_opened(period):
         """إشعار بفتح أسبوع جديد"""
         # إشعار لجميع مديري الأقسام العادية النشطة
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         recipients = User.objects.filter(
             role='section_manager',
             is_active=True,
@@ -90,6 +94,7 @@ class NotificationService:
         parent = submission.qism.parent
         if not parent:
             return
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         planners = User.objects.filter(
             role='planning_section',
             is_active=True,
@@ -108,6 +113,7 @@ class NotificationService:
     @staticmethod
     def notify_submission_approved(submission):
         """إشعار مدير القسم باعتماد المنجز"""
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         managers = User.objects.filter(
             unit=submission.qism,
             role='section_manager',
@@ -125,6 +131,7 @@ class NotificationService:
     @staticmethod
     def notify_extension_granted(extension):
         """إشعار بمنح تمديد"""
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         managers = User.objects.filter(
             unit=extension.qism,
             role='section_manager',
@@ -142,6 +149,7 @@ class NotificationService:
     @staticmethod
     def notify_qualitative_approved(answer):
         """إشعار باعتماد المنجز النوعي"""
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         managers = User.objects.filter(
             unit=answer.submission.qism,
             role='section_manager',
@@ -159,6 +167,7 @@ class NotificationService:
     @staticmethod
     def notify_qualitative_rejected(answer):
         """إشعار برفض المنجز النوعي"""
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         managers = User.objects.filter(
             unit=answer.submission.qism,
             role='section_manager',
@@ -176,6 +185,7 @@ class NotificationService:
     @staticmethod
     def notify_qualitative_pending(answer):
         """إشعار بوجود منجز نوعي بانتظار اعتماد الإحصاء"""
+        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
         admins = User.objects.filter(
             role='statistics_admin',
             is_active=True,
@@ -211,6 +221,6 @@ class NotificationService:
                     }
                 }
             )
-        except Exception:
-            # عدم تعطيل العملية إذا فشل WebSocket
-            pass
+        except Exception as e:
+            # عدم تعطيل العملية إذا فشل WebSocket مع تسجيل التحذير
+            logger.warning(f"فشل إرسال إشعار WebSocket: {e}")

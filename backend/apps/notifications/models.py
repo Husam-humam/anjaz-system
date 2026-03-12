@@ -46,6 +46,8 @@ class Notification(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['created_at'], name='idx_notification_created'),
+            models.Index(fields=['notification_type'], name='idx_notification_type'),
         ]
 
     def __str__(self):

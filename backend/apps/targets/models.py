@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 
 
@@ -29,9 +29,17 @@ class Target(models.Model):
         verbose_name = 'مستهدف'
         verbose_name_plural = 'المستهدفات'
         unique_together = ('qism', 'indicator', 'year')
+        indexes = [
+            models.Index(fields=['qism', 'indicator', 'year'], name='idx_target_qism_ind_year'),
+            models.Index(fields=['year'], name='idx_target_year'),
+        ]
 
     def __str__(self):
         return f'{self.qism.name} - {self.indicator.name} ({self.year})'
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def clean(self):
         super().clean()
@@ -45,5 +53,5 @@ class Target(models.Model):
                     raise ValidationError({
                         'indicator': 'لا يمكن تحديد مستهدف لمؤشر نصي'
                     })
-            except Exception:
-                pass
+            except (ValueError, ObjectDoesNotExist):
+                pass  # indicator not yet loaded

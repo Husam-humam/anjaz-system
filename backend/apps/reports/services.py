@@ -224,7 +224,7 @@ class ReportService:
                 ws.append([
                     row.get('qism_name', ''),
                     row.get('indicator_name', ''),
-                    row.get('aggregated_value', ''),
+                    row.get('aggregated_value') if row.get('aggregated_value') is not None else '-',
                     row.get('accumulation_type', ''),
                     row.get('data_points', ''),
                 ])
@@ -264,7 +264,7 @@ class ReportService:
                 table_data.append([
                     str(row.get('qism_name', '')),
                     str(row.get('indicator_name', '')),
-                    str(row.get('aggregated_value', '')),
+                    str(row.get('aggregated_value')) if row.get('aggregated_value') is not None else '-',
                     str(row.get('accumulation_type', '')),
                     str(row.get('data_points', '')),
                 ])

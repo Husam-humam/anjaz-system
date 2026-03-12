@@ -18,7 +18,6 @@ export default function SubmissionPage() {
   const [submission, setSubmission] = useState<WeeklySubmission | null>(null);
   const [answers, setAnswers] = useState<Record<number, Partial<SubmissionAnswer>>>({});
   const [showConfirm, setShowConfirm] = useState(false);
-  const [autoSaveTimer, setAutoSaveTimer] = useState<ReturnType<typeof setInterval> | null>(null);
 
   // الحصول على الفترة المفتوحة الحالية
   const { data: periodsData, isLoading: periodsLoading } = useQuery({
@@ -71,7 +70,7 @@ export default function SubmissionPage() {
   });
 
   const handleSave = useCallback(() => {
-    if (!submission) return;
+    if (!submission?.id || !submission?.is_editable) return;
     const answersArray = Object.values(answers).map((a) => ({
       form_item: a.form_item,
       numeric_value: a.numeric_value,
@@ -80,16 +79,14 @@ export default function SubmissionPage() {
       qualitative_details: a.qualitative_details || "",
     }));
     saveMutation.mutate({ id: submission.id, answers: answersArray });
-  }, [submission, answers]);
+  }, [submission?.id, submission?.is_editable, answers]);
 
   // الحفظ التلقائي كل دقيقتين
   useEffect(() => {
-    if (submission?.is_editable) {
-      const timer = setInterval(handleSave, 120000);
-      setAutoSaveTimer(timer);
-      return () => clearInterval(timer);
-    }
-  }, [submission, handleSave]);
+    if (!submission?.is_editable) return;
+    const timer = setInterval(handleSave, 120000);
+    return () => clearInterval(timer);
+  }, [submission?.is_editable, handleSave]);
 
   const handleAnswerChange = (
     formItemId: number,

@@ -728,6 +728,11 @@ class QualitativeViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = 'pk'
 
+    def get_permissions(self):
+        if self.action in ['approve', 'reject']:
+            return [permissions.IsAuthenticated(), IsStatisticsAdmin()]
+        return [permissions.IsAuthenticated()]
+
     def get_queryset(self):
         return SubmissionAnswer.objects.filter(
             is_qualitative=True,

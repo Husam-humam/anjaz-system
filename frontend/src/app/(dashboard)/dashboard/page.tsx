@@ -37,7 +37,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">لوحة التحكم</h1>
           <p className="text-gray-500 mt-1">
-            مرحباً {user?.full_name}
+            مرحباً {user?.full_name || "المستخدم"}
           </p>
         </div>
         {summary?.period && (

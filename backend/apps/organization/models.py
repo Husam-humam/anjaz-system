@@ -71,6 +71,7 @@ class OrganizationUnit(MPTTModel):
         indexes = [
             models.Index(fields=['unit_type'], name='idx_org_units_type'),
             models.Index(fields=['parent'], name='idx_org_units_parent'),
+            models.Index(fields=['tree_id', 'lft', 'rght'], name='idx_org_units_mptt'),
         ]
 
     def __str__(self):

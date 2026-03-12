@@ -22,8 +22,8 @@ INTERNAL_IPS = [
 # Use console email backend in development
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-# CORS - allow all in development
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS - allow all in development (configurable via env)
+CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)  # noqa: F405
 
 # Simplified static file storage for development
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'

@@ -39,8 +39,8 @@ class FormTemplateService:
                 'items': 'يجب أن تحتوي الاستمارة على بند واحد على الأقل'
             })
 
-        # حساب رقم الإصدار الجديد
-        max_version = FormTemplate.objects.filter(
+        # حساب رقم الإصدار الجديد مع قفل لمنع التعارضات المتزامنة
+        max_version = FormTemplate.objects.select_for_update().filter(
             qism=qism
         ).aggregate(max_version=Max('version'))['max_version']
         new_version = (max_version or 0) + 1
@@ -118,9 +118,12 @@ class FormTemplateService:
         اعتماد القالب: بانتظار الاعتماد ← معتمد.
         يتم استبدال الإصدار المعتمد السابق لنفس القسم.
         """
+        # قفل السجل لمنع التعارضات المتزامنة
+        template = FormTemplate.objects.select_for_update().get(pk=template.pk)
+
         if template.status != FormTemplate.Status.PENDING_APPROVAL:
             raise ValidationError(
-                'لا يمكن اعتماد الاستمارة إلا إذا كانت بانتظار الاعتماد'
+                'يجب أن تكون الاستمارة بحالة \'بانتظار الاعتماد\''
             )
 
         # التحقق من صحة الأسبوع والسنة
@@ -135,8 +138,8 @@ class FormTemplateService:
                 'effective_from_week': 'رقم الأسبوع يجب أن يكون بين 1 و 53'
             })
 
-        # استبدال الإصدار المعتمد السابق لنفس القسم
-        FormTemplate.objects.filter(
+        # استبدال الإصدار المعتمد السابق لنفس القسم مع قفل
+        FormTemplate.objects.select_for_update().filter(
             qism=template.qism,
             status=FormTemplate.Status.APPROVED,
         ).update(status=FormTemplate.Status.SUPERSEDED)

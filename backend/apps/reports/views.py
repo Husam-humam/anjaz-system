@@ -1,4 +1,5 @@
 from django.http import FileResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,18 +11,58 @@ from .serializers import (ComplianceReportSerializer, ExportParamsSerializer,
 from .services import ReportService
 
 
+def _validate_unit_scope(request, unit_id):
+    """التحقق من نطاق صلاحية المستخدم على الوحدة المحددة"""
+    if unit_id is None:
+        return None
+    if request.user.role == 'statistics_admin':
+        return None
+    if request.user.role == 'section_manager':
+        if request.user.unit_id != unit_id:
+            return Response(
+                {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    elif request.user.role == 'planning_section' and request.user.unit:
+        parent = request.user.unit.parent
+        if parent:
+            allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
+            allowed_ids.append(parent.id)
+            if unit_id not in allowed_ids:
+                return Response(
+                    {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+    return None
+
+
 class ReportSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        year = int(request.query_params.get('year', 2025))
-        week_number = request.query_params.get('week_number')
-        unit_id = request.query_params.get('unit_id')
+        # التحقق من الصلاحيات
+        try:
+            year = int(request.query_params.get('year', timezone.now().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'قيمة السنة غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
 
+        week_number = request.query_params.get('week_number')
         if week_number:
-            week_number = int(week_number)
+            try:
+                week_number = int(week_number)
+            except (ValueError, TypeError):
+                return Response({'detail': 'رقم الأسبوع غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+
+        unit_id = request.query_params.get('unit_id')
         if unit_id:
-            unit_id = int(unit_id)
+            try:
+                unit_id = int(unit_id)
+            except (ValueError, TypeError):
+                return Response({'detail': 'معرف الوحدة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+            # التحقق من نطاق الصلاحية
+            scope_error = _validate_unit_scope(request, unit_id)
+            if scope_error:
+                return scope_error
 
         data = ReportService.get_summary(request.user, year, week_number, unit_id)
         return Response(data)
@@ -32,12 +73,28 @@ class PeriodicReportView(APIView):
 
     def get(self, request):
         period_type = request.query_params.get('period_type', 'weekly')
-        year = int(request.query_params.get('year', 2025))
-        period_number = int(request.query_params.get('period_number', 1))
-        unit_id = request.query_params.get('unit_id')
 
+        # التحقق من الصلاحيات
+        try:
+            year = int(request.query_params.get('year', timezone.now().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'قيمة السنة غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            period_number = int(request.query_params.get('period_number', 1))
+        except (ValueError, TypeError):
+            return Response({'detail': 'رقم الفترة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+
+        unit_id = request.query_params.get('unit_id')
         if unit_id:
-            unit_id = int(unit_id)
+            try:
+                unit_id = int(unit_id)
+            except (ValueError, TypeError):
+                return Response({'detail': 'معرف الوحدة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+            # التحقق من نطاق الصلاحية
+            scope_error = _validate_unit_scope(request, unit_id)
+            if scope_error:
+                return scope_error
 
         data = ReportService.get_periodic_report(period_type, year, period_number, unit_id)
         return Response(data)
@@ -47,11 +104,22 @@ class ComplianceReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        year = int(request.query_params.get('year', 2025))
-        unit_id = request.query_params.get('unit_id')
+        # التحقق من الصلاحيات
+        try:
+            year = int(request.query_params.get('year', timezone.now().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'قيمة السنة غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
 
+        unit_id = request.query_params.get('unit_id')
         if unit_id:
-            unit_id = int(unit_id)
+            try:
+                unit_id = int(unit_id)
+            except (ValueError, TypeError):
+                return Response({'detail': 'معرف الوحدة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+            # التحقق من نطاق الصلاحية
+            scope_error = _validate_unit_scope(request, unit_id)
+            if scope_error:
+                return scope_error
 
         data = ReportService.get_compliance_report(year, unit_id)
         serializer = ComplianceReportSerializer(data, many=True)
@@ -62,17 +130,35 @@ class QualitativeReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        year = int(request.query_params.get('year', 2025))
+        # التحقق من الصلاحيات
+        try:
+            year = int(request.query_params.get('year', timezone.now().year))
+        except (ValueError, TypeError):
+            return Response({'detail': 'قيمة السنة غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
+
         unit_id = request.query_params.get('unit_id')
+        if unit_id:
+            try:
+                unit_id = int(unit_id)
+            except (ValueError, TypeError):
+                return Response({'detail': 'معرف الوحدة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+            # التحقق من نطاق الصلاحية
+            scope_error = _validate_unit_scope(request, unit_id)
+            if scope_error:
+                return scope_error
+
         from_week = request.query_params.get('from_week')
         to_week = request.query_params.get('to_week')
-
-        if unit_id:
-            unit_id = int(unit_id)
         if from_week:
-            from_week = int(from_week)
+            try:
+                from_week = int(from_week)
+            except (ValueError, TypeError):
+                return Response({'detail': 'رقم أسبوع البداية غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
         if to_week:
-            to_week = int(to_week)
+            try:
+                to_week = int(to_week)
+            except (ValueError, TypeError):
+                return Response({'detail': 'رقم أسبوع النهاية غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
 
         queryset = ReportService.get_qualitative_report(year, unit_id, from_week, to_week)
 
@@ -104,6 +190,12 @@ class ReportExportView(APIView):
         year = params['year']
         period_number = params.get('period_number', 1)
         unit_id = params.get('unit_id')
+
+        # التحقق من نطاق الصلاحية
+        if unit_id:
+            scope_error = _validate_unit_scope(request, unit_id)
+            if scope_error:
+                return scope_error
 
         report_data = ReportService.get_periodic_report(
             period_type, year, period_number, unit_id

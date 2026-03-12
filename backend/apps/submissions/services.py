@@ -49,7 +49,11 @@ class WeeklyPeriodService:
         period.save()
 
         # إرسال إشعارات لجميع مديري الأقسام النشطة
-        _notify_period_opened(period)
+        try:
+            _notify_period_opened(period)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار فتح الفترة", exc_info=True)
 
         return period
 
@@ -114,7 +118,11 @@ class WeeklyPeriodService:
                     )
 
             # إرسال إشعار تأخر
-            _notify_submission_late(qism, period)
+            try:
+                _notify_submission_late(qism, period)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("فشل إرسال إشعار التأخر", exc_info=True)
 
         return period
 
@@ -196,6 +204,9 @@ class SubmissionService:
             ...
         ]
         """
+        # قفل السجل لمنع التعارضات المتزامنة
+        submission = WeeklySubmission.objects.select_for_update().get(pk=submission.pk)
+
         if not submission.is_editable():
             raise ValidationError(
                 'لا يمكن تعديل هذا المنجز - الموعد النهائي قد انتهى أو الفترة مغلقة'
@@ -243,6 +254,9 @@ class SubmissionService:
         - تحديث تاريخ الإرسال
         - إرسال إشعار لقسم التخطيط
         """
+        # قفل السجل لمنع التعارضات المتزامنة
+        submission = WeeklySubmission.objects.select_for_update().get(pk=submission.pk)
+
         valid_statuses = [
             WeeklySubmission.Status.DRAFT,
             WeeklySubmission.Status.EXTENDED,
@@ -288,7 +302,11 @@ class SubmissionService:
         submission.save(update_fields=['status', 'submitted_at'])
 
         # إرسال إشعار لقسم التخطيط
-        _notify_submission_received(submission)
+        try:
+            _notify_submission_received(submission)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار استلام المنجز", exc_info=True)
 
         return submission
 
@@ -323,11 +341,19 @@ class SubmissionService:
             answer.save(update_fields=['qualitative_status'])
 
         # إرسال إشعار اعتماد المنجز
-        _notify_submission_approved(submission)
+        try:
+            _notify_submission_approved(submission)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار اعتماد المنجز", exc_info=True)
 
         # إرسال إشعار للمنجزات النوعية المعلقة (لمدير قسم الإحصاء)
-        if qualitative_answers.exists():
-            _notify_qualitative_pending(submission)
+        try:
+            if qualitative_answers.exists():
+                _notify_qualitative_pending(submission)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار المنجزات النوعية", exc_info=True)
 
         return submission
 
@@ -387,7 +413,11 @@ class QismExtensionService:
             submission.save(update_fields=['status'])
 
         # إرسال إشعار
-        _notify_extension_granted(extension)
+        try:
+            _notify_extension_granted(extension)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار التمديد", exc_info=True)
 
         return extension
 
@@ -578,7 +608,11 @@ class QualitativeService:
         ])
 
         # إرسال إشعار
-        _notify_qualitative_approved(answer)
+        try:
+            _notify_qualitative_approved(answer)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار اعتماد النوعي", exc_info=True)
 
         return answer
 
@@ -608,7 +642,11 @@ class QualitativeService:
         ])
 
         # إرسال إشعار
-        _notify_qualitative_rejected(answer)
+        try:
+            _notify_qualitative_rejected(answer)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("فشل إرسال إشعار رفض النوعي", exc_info=True)
 
         return answer
 
