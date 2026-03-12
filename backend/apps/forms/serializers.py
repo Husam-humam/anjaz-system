@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.indicators.models import Indicator
+from apps.organization.models import OrganizationUnit
 from .models import FormTemplate, FormTemplateItem
 
 
@@ -66,7 +68,7 @@ class FormTemplateSerializer(serializers.ModelSerializer):
 class FormTemplateItemCreateSerializer(serializers.Serializer):
     """مسلسل بند الاستمارة — للإنشاء والتحديث"""
     indicator = serializers.PrimaryKeyRelatedField(
-        queryset=None,  # يتم تعيينه في __init__
+        queryset=Indicator.objects.filter(is_active=True),
         error_messages={
             'does_not_exist': 'المؤشر المحدد غير موجود',
             'incorrect_type': 'قيمة غير صالحة لمعرف المؤشر',
@@ -75,18 +77,13 @@ class FormTemplateItemCreateSerializer(serializers.Serializer):
     is_mandatory = serializers.BooleanField(default=False)
     display_order = serializers.IntegerField(default=0, min_value=0)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from apps.indicators.models import Indicator
-        self.fields['indicator'].queryset = Indicator.objects.filter(
-            is_active=True
-        )
-
 
 class FormTemplateCreateSerializer(serializers.Serializer):
     """مسلسل إنشاء قالب الاستمارة مع البنود"""
     qism = serializers.PrimaryKeyRelatedField(
-        queryset=None,  # يتم تعيينه في __init__
+        queryset=OrganizationUnit.objects.filter(
+            unit_type='qism', qism_role='regular', is_active=True
+        ),
         error_messages={
             'does_not_exist': 'القسم المحدد غير موجود',
             'incorrect_type': 'قيمة غير صالحة لمعرف القسم',
@@ -94,13 +91,6 @@ class FormTemplateCreateSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     items = FormTemplateItemCreateSerializer(many=True)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from apps.organization.models import OrganizationUnit
-        self.fields['qism'].queryset = OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True
-        )
 
     def validate_items(self, value):
         """التحقق من وجود بنود"""

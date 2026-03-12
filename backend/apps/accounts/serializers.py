@@ -152,6 +152,28 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         return value
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """مسلسل تغيير كلمة المرور — للمستخدم نفسه"""
+    old_password = serializers.CharField(
+        required=True,
+        write_only=True,
+        error_messages={
+            'required': 'كلمة المرور الحالية مطلوبة.',
+            'blank': 'كلمة المرور الحالية لا يمكن أن تكون فارغة.',
+        }
+    )
+    new_password = serializers.CharField(
+        required=True,
+        min_length=6,
+        write_only=True,
+        error_messages={
+            'required': 'كلمة المرور الجديدة مطلوبة.',
+            'blank': 'كلمة المرور الجديدة لا يمكن أن تكون فارغة.',
+            'min_length': 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.',
+        }
+    )
+
+
 class ResetPasswordSerializer(serializers.Serializer):
     """مسلسل إعادة تعيين كلمة المرور"""
     new_password = serializers.CharField(

@@ -19,6 +19,7 @@ class LoginThrottle(AnonRateThrottle):
     rate = '5/minute'
 
 from .serializers import (
+    ChangePasswordSerializer,
     LoginSerializer,
     ResetPasswordSerializer,
     UserCreateSerializer,
@@ -135,6 +136,33 @@ class MeView(APIView):
     def get(self, request):
         serializer = UserProfileSerializer(request.user)
         return Response(serializer.data)
+
+
+class ChangePasswordView(APIView):
+    """
+    تغيير كلمة المرور — POST /api/auth/change-password/
+    يسمح للمستخدم المسجّل بتغيير كلمة مروره بعد التحقق من الحالية.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            UserService.change_password(
+                user=request.user,
+                old_password=serializer.validated_data['old_password'],
+                new_password=serializer.validated_data['new_password'],
+            )
+        except DjangoValidationError as e:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(e.message_dict)
+
+        return Response(
+            {'message': 'تم تغيير كلمة المرور بنجاح.'},
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserViewSet(viewsets.ModelViewSet):

@@ -50,13 +50,16 @@ class Command(BaseCommand):
         admin_full_name = os.environ.get('ADMIN_FULL_NAME', 'مدير النظام')
 
         if not User.objects.filter(username=admin_username).exists():
-            admin = User.objects.create_superuser(
+            admin = User(
                 username=admin_username,
-                password=admin_password,
                 full_name=admin_full_name,
                 role='statistics_admin',
                 unit=stat_qism,
+                is_staff=True,
+                is_superuser=True,
             )
+            admin.set_password(admin_password)
+            admin.save()
             self.stdout.write(f'  ✓ تم إنشاء مدير النظام: {admin_username}')
         else:
             self.stdout.write(f'  - مدير النظام موجود مسبقاً: {admin_username}')
@@ -140,24 +143,26 @@ class Command(BaseCommand):
         # إنشاء مستخدمين تجريبيين
         planning_unit = OrganizationUnit.objects.filter(code='PLAN_HR').first()
         if planning_unit and not User.objects.filter(username='planner1').exists():
-            User.objects.create_user(
+            user = User(
                 username='planner1',
-                password='planner123',
                 full_name='أحمد المخطط',
                 role='planning_section',
                 unit=planning_unit,
             )
+            user.set_password('Planner@2026')
+            user.save()
             self.stdout.write('  ✓ تم إنشاء مستخدم قسم التخطيط: planner1')
 
         emp_unit = OrganizationUnit.objects.filter(code='EMP').first()
         if emp_unit and not User.objects.filter(username='manager1').exists():
-            User.objects.create_user(
+            user = User(
                 username='manager1',
-                password='manager123',
                 full_name='محمد المدير',
                 role='section_manager',
                 unit=emp_unit,
             )
+            user.set_password('Manager@2026')
+            user.save()
             self.stdout.write('  ✓ تم إنشاء مدير قسم: manager1')
 
         self.stdout.write(self.style.SUCCESS('  ✓ تم إنشاء البيانات التجريبية'))

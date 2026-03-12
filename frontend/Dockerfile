@@ -6,12 +6,12 @@ ARG NEXT_PUBLIC_WS_URL
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production || npm install
+RUN npm ci || npm install
 
-RUN adduser -D -u 1001 appuser
+RUN adduser -D -u 1001 appuser && chown -R appuser:appuser /app
 USER appuser
 
-COPY . .
+COPY --chown=appuser:appuser . .
 
 EXPOSE 3000
 

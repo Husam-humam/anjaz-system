@@ -2,6 +2,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from mptt.models import MPTTModel, TreeForeignKey
 
+from .querysets import OrganizationUnitQuerySet
+
 
 class UnitType(models.TextChoices):
     """أنواع الكيانات التنظيمية"""
@@ -19,6 +21,8 @@ class QismRole(models.TextChoices):
 
 class OrganizationUnit(MPTTModel):
     """نموذج الكيان التنظيمي - يمثل الهيكل التنظيمي للمؤسسة"""
+
+    objects = OrganizationUnitQuerySet.as_manager()
 
     name = models.CharField(
         max_length=200,
@@ -95,11 +99,12 @@ class OrganizationUnit(MPTTModel):
                 })
 
         elif self.unit_type == UnitType.QISM:
-            if self.parent is None:
+            # الأقسام الخاصة (إحصاء/تخطيط) يمكن أن تكون بدون أب
+            if self.parent is None and self.qism_role == QismRole.REGULAR:
                 raise ValidationError({
                     'parent': 'القسم يجب أن يتبع مديرية أو دائرة.'
                 })
-            if self.parent.unit_type not in (UnitType.MUDIRIYA, UnitType.DAIRA):
+            if self.parent is not None and self.parent.unit_type not in (UnitType.MUDIRIYA, UnitType.DAIRA):
                 raise ValidationError({
                     'parent': 'القسم يجب أن يتبع مديرية أو دائرة فقط.'
                 })

@@ -44,6 +44,21 @@ class UserService:
 
     @staticmethod
     @transaction.atomic
+    def change_password(user, old_password, new_password):
+        """تغيير كلمة المرور — يتحقق من كلمة المرور الحالية أولاً"""
+        if not user.check_password(old_password):
+            raise ValidationError({'old_password': ['كلمة المرور الحالية غير صحيحة.']})
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            raise ValidationError({'new_password': e.messages})
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        logger.info(f"Password changed by user {user.username} (id={user.pk})")
+        return user
+
+    @staticmethod
+    @transaction.atomic
     def reset_password(user, new_password):
         """إعادة تعيين كلمة المرور"""
         try:

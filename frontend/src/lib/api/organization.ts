@@ -3,7 +3,7 @@ import type { OrganizationUnit } from "@/types/organization";
 import type { ApiResponse } from "@/types/api";
 
 export async function getOrganizationTree(): Promise<OrganizationUnit[]> {
-  const { data } = await apiClient.get<OrganizationUnit[]>("/organization/tree/");
+  const { data } = await apiClient.get<OrganizationUnit[]>("/organization/units/tree/");
   return data;
 }
 

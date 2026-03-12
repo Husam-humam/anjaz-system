@@ -5,7 +5,7 @@ from .views import IndicatorCategoryViewSet, IndicatorViewSet
 
 router = DefaultRouter()
 router.register('categories', IndicatorCategoryViewSet, basename='indicator-category')
-router.register('indicators', IndicatorViewSet, basename='indicator')
+router.register('', IndicatorViewSet, basename='indicator')
 
 urlpatterns = [
     path('', include(router.urls)),
