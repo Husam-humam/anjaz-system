@@ -1,5 +1,6 @@
 import apiClient from "./client";
 import type {
+  AuditLogEntry,
   WeeklyPeriod,
   WeeklySubmission,
   SubmissionAnswer,
@@ -26,16 +27,18 @@ export async function createSubmission(periodId: number): Promise<WeeklySubmissi
   return data;
 }
 
+export interface AnswerInput {
+  form_item: number;
+  numeric_value?: number | null;
+  text_value?: string;
+  is_qualitative?: boolean;
+  qualitative_details?: string;
+}
+
 export async function updateSubmission(
   id: number,
   submissionData: {
-    answers?: {
-      form_item: number;
-      numeric_value?: number | null;
-      text_value?: string;
-      is_qualitative?: boolean;
-      qualitative_details?: string;
-    }[];
+    answers?: AnswerInput[];
     notes?: string;
   }
 ): Promise<WeeklySubmission> {
@@ -56,6 +59,97 @@ export async function approveSubmission(id: number): Promise<WeeklySubmission> {
 export async function getSubmissionHistory(id: number): Promise<WeeklySubmission[]> {
   const { data } = await apiClient.get<WeeklySubmission[]>(`/submissions/${id}/history/`);
   return data;
+}
+
+// ═══════════════════════════════════════════════
+// مراجعة الإحصاء (Admin Review) — الطبقة الثالثة
+// ═══════════════════════════════════════════════
+
+/**
+ * فلاتر قائمة المنجزات بانتظار مراجعة الإحصاء.
+ * - `reviewed`: "true" تُرجع المراجَعة، "false" تُرجع غير المراجَعة، أو تُحذف لإرجاع الكل.
+ */
+export interface PendingAdminReviewFilters {
+  reviewed?: "true" | "false";
+  week?: string;
+  year?: string;
+  daira_id?: string;
+  mudiriya_id?: string;
+  qism_id?: string;
+  page?: string;
+  page_size?: string;
+}
+
+export async function getPendingAdminReview(
+  filters: PendingAdminReviewFilters = {}
+): Promise<ApiResponse<WeeklySubmission>> {
+  const params: Record<string, string> = {};
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") {
+      params[key] = value;
+    }
+  });
+  const { data } = await apiClient.get<ApiResponse<WeeklySubmission>>(
+    "/submissions/pending-admin-review/",
+    { params }
+  );
+  return data;
+}
+
+export async function adminApproveSubmission(id: number): Promise<WeeklySubmission> {
+  const { data } = await apiClient.post<WeeklySubmission>(
+    `/submissions/${id}/admin-approve/`
+  );
+  return data;
+}
+
+export interface AdminAnswerEdit {
+  answer_id: number;
+  numeric_value?: number | null;
+  text_value?: string;
+}
+
+export async function adminEditSubmission(
+  id: number,
+  payload: { reason: string; answer_edits: AdminAnswerEdit[] }
+): Promise<WeeklySubmission> {
+  const { data } = await apiClient.post<WeeklySubmission>(
+    `/submissions/${id}/admin-edit/`,
+    payload
+  );
+  return data;
+}
+
+export async function adminReturnSubmission(
+  id: number,
+  reason: string
+): Promise<WeeklySubmission> {
+  const { data } = await apiClient.post<WeeklySubmission>(
+    `/submissions/${id}/admin-return/`,
+    { reason }
+  );
+  return data;
+}
+
+export async function getSubmissionAuditLog(
+  id: number
+): Promise<{ results: AuditLogEntry[] }> {
+  const { data } = await apiClient.get<{ results: AuditLogEntry[] }>(
+    `/submissions/${id}/audit-log/`
+  );
+  return data;
+}
+
+/**
+ * عدد المنجزات المعتمَدة من التخطيط وبانتظار مراجعة الإحصاء — للـ sidebar badge.
+ * نستخدم `page_size=1` لتقليل حجم الاستجابة؛ المعلومة المطلوبة في `count` فقط.
+ */
+export async function getPendingAdminReviewCount(): Promise<number> {
+  const { data } = await apiClient.get<ApiResponse<WeeklySubmission>>(
+    "/submissions/pending-admin-review/",
+    { params: { reviewed: "false", page_size: "1" } }
+  );
+  return data.count;
 }
 
 // --- الفترات الأسبوعية ---
@@ -102,6 +196,107 @@ export interface ComplianceData {
 
 export async function getCompliance(periodId: number): Promise<ComplianceData> {
   const { data } = await apiClient.get<ComplianceData>(`/periods/${periodId}/compliance/`);
+  return data;
+}
+
+// ── تفصيل مُجمّع لنطاق ضمن فترة ──
+
+export interface PeriodScopeUnit {
+  id: number | null;
+  name: string;
+  unit_type: "institution" | "daira" | "mudiriya" | "qism";
+  code: string | null;
+}
+
+export interface AggregatedIndicator {
+  indicator_id: number;
+  indicator_name: string;
+  indicator_unit_type: string;
+  indicator_unit_label: string;
+  indicator_category: string | null;
+  accumulation_type: string;
+  aggregated_value: number;
+  contributing_qisms: number;
+  data_points: number;
+}
+
+export interface QismSubmissionInfo {
+  qism_id: number;
+  qism_name: string;
+  qism_code: string;
+  submission_id: number | null;
+  status: string;
+  submitted_at: string | null;
+}
+
+export interface SubmissionAnswerDetail {
+  id: number;
+  indicator_name: string;
+  indicator_unit_type: string;
+  indicator_unit_label: string;
+  indicator_category: string | null;
+  is_mandatory: boolean;
+  numeric_value: number | null;
+  text_value: string;
+  is_qualitative: boolean;
+  qualitative_details: string;
+  qualitative_status: string;
+}
+
+export interface QismSubmissionDetail {
+  id: number;
+  status: string;
+  submitted_at: string | null;
+  planning_approved_by: string | null;
+  planning_approved_at: string | null;
+  notes: string;
+  answers: SubmissionAnswerDetail[];
+}
+
+export interface QualitativeAnswerSummary {
+  id: number;
+  qism_name: string;
+  indicator_name: string;
+  details: string;
+}
+
+export interface PeriodAggregatedData {
+  scope_unit: PeriodScopeUnit;
+  period: {
+    id: number;
+    year: number;
+    week_number: number;
+    start_date: string;
+    end_date: string;
+    deadline: string | null;
+    status: string;
+  };
+  mode: "qism" | "group";
+  qism_submission: QismSubmissionDetail | null;
+  qism_submissions: QismSubmissionInfo[];
+  aggregated_indicators: AggregatedIndicator[];
+  qualitative_answers: QualitativeAnswerSummary[];
+  stats: {
+    total: number;
+    submitted: number;
+    approved: number;
+    late: number;
+    not_submitted: number;
+  };
+}
+
+export async function getPeriodAggregated(
+  periodId: number,
+  unitId?: number | null
+): Promise<PeriodAggregatedData> {
+  const params: Record<string, string> = {};
+  if (unitId !== null && unitId !== undefined) {
+    params.unit_id = unitId.toString();
+  }
+  const { data } = await apiClient.get<PeriodAggregatedData>(
+    `/periods/${periodId}/aggregated/`,
+    { params }
+  );
   return data;
 }
 

@@ -8,6 +8,7 @@ import {
   updateSubmission,
   submitSubmission,
   getPeriods,
+  type AnswerInput,
 } from "@/lib/api/submissions";
 import type { WeeklySubmission, SubmissionAnswer } from "@/types/submissions";
 import { STATUS_LABELS } from "@/lib/constants";
@@ -50,7 +51,7 @@ export default function SubmissionPage() {
 
   // حفظ الإجابات
   const saveMutation = useMutation({
-    mutationFn: (data: { id: number; answers: Partial<SubmissionAnswer>[] }) =>
+    mutationFn: (data: { id: number; answers: AnswerInput[] }) =>
       updateSubmission(data.id, {
         answers: data.answers,
       }),
@@ -71,13 +72,17 @@ export default function SubmissionPage() {
 
   const handleSave = useCallback(() => {
     if (!submission?.id || !submission?.is_editable) return;
-    const answersArray = Object.values(answers).map((a) => ({
-      form_item: a.form_item,
-      numeric_value: a.numeric_value,
-      text_value: a.text_value || "",
-      is_qualitative: a.is_qualitative || false,
-      qualitative_details: a.qualitative_details || "",
-    }));
+    const answersArray: AnswerInput[] = Object.values(answers)
+      .filter((a): a is Partial<SubmissionAnswer> & { form_item: number } =>
+        typeof a.form_item === "number"
+      )
+      .map((a) => ({
+        form_item: a.form_item,
+        numeric_value: a.numeric_value ?? null,
+        text_value: a.text_value || "",
+        is_qualitative: a.is_qualitative || false,
+        qualitative_details: a.qualitative_details || "",
+      }));
     saveMutation.mutate({ id: submission.id, answers: answersArray });
   }, [submission?.id, submission?.is_editable, answers]);
 

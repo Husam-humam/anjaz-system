@@ -3,9 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/authStore";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import type { UserRole } from "@/types/submissions";
+import { getPendingFormTemplatesCount } from "@/lib/api/forms";
+import { getPendingAdminReviewCount } from "@/lib/api/submissions";
 import {
   LayoutDashboard,
   Building2,
@@ -17,16 +20,21 @@ import {
   FileText,
   Bell,
   ClipboardList,
+  ClipboardCheck,
   History,
   Menu,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+type BadgeKey = "pending_forms" | "pending_admin_review";
+
 interface SidebarItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** مفتاح لعرض badge ديناميكي — يُحدَّد تحت */
+  badgeKey?: BadgeKey;
 }
 
 const sidebarItemsByRole: Record<UserRole, SidebarItem[]> = {
@@ -36,23 +44,38 @@ const sidebarItemsByRole: Record<UserRole, SidebarItem[]> = {
     { label: "بنك المؤشرات", href: "/indicators", icon: BarChart3 },
     { label: "المستخدمون", href: "/users", icon: Users },
     { label: "الأسابيع", href: "/periods", icon: Calendar },
+    {
+      label: "قوالب الاستمارات",
+      href: "/forms",
+      icon: ClipboardList,
+      badgeKey: "pending_forms",
+    },
+    {
+      label: "المنجزات",
+      href: "/achievements",
+      icon: ClipboardCheck,
+      badgeKey: "pending_admin_review",
+    },
     { label: "المستهدفات", href: "/targets", icon: Target },
-    { label: "طلبات الاعتماد", href: "/approvals/forms", icon: CheckCircle },
     { label: "التقارير", href: "/reports", icon: FileText },
     { label: "الإشعارات", href: "/notifications", icon: Bell },
   ],
   planning_section: [
     { label: "لوحة التحكم", href: "/dashboard", icon: LayoutDashboard },
-    { label: "استمارات الأقسام", href: "/forms", icon: ClipboardList },
+    {
+      label: "قوالب الاستمارات",
+      href: "/forms",
+      icon: ClipboardList,
+      badgeKey: "pending_forms",
+    },
     { label: "المنجزات بانتظار الاعتماد", href: "/approvals", icon: CheckCircle },
-    { label: "تقارير المديرية", href: "/reports", icon: FileText },
+    { label: "التقارير", href: "/reports", icon: FileText },
     { label: "الإشعارات", href: "/notifications", icon: Bell },
   ],
   section_manager: [
     { label: "لوحة التحكم", href: "/dashboard", icon: LayoutDashboard },
     { label: "تقديم المنجز", href: "/submission", icon: ClipboardList },
     { label: "سجل المنجزات", href: "/history", icon: History },
-    { label: "تقارير قسمي", href: "/reports", icon: FileText },
     { label: "الإشعارات", href: "/notifications", icon: Bell },
   ],
 };
@@ -64,6 +87,41 @@ export function Sidebar() {
 
   const role = user?.role;
   const items = role ? sidebarItemsByRole[role] : [];
+
+  // عدّاد القوالب المعلّقة — يُعرض في الـ sidebar
+  const { data: pendingFormsCount = 0 } = useQuery({
+    queryKey: ["sidebar-pending-forms-count"],
+    queryFn: getPendingFormTemplatesCount,
+    enabled: role === "statistics_admin" || role === "planning_section",
+    // يُحدَّث كل 30 ثانية للمزامنة الخفيفة
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+
+  // عدّاد المنجزات بانتظار مراجعة الإحصاء — يُعرض للأدمن فقط
+  const { data: pendingAdminReviewCount = 0 } = useQuery({
+    queryKey: ["sidebar-pending-admin-review-count"],
+    queryFn: getPendingAdminReviewCount,
+    enabled: role === "statistics_admin",
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+
+  const getBadgeCount = (badgeKey?: BadgeKey): number => {
+    if (badgeKey === "pending_forms") return pendingFormsCount;
+    if (badgeKey === "pending_admin_review") return pendingAdminReviewCount;
+    return 0;
+  };
+
+  const getBadgeTitle = (badgeKey: BadgeKey | undefined, count: number): string => {
+    if (badgeKey === "pending_forms") {
+      return `${count} قالب بانتظار الاعتماد`;
+    }
+    if (badgeKey === "pending_admin_review") {
+      return `${count} منجز بانتظار مراجعة الإحصاء`;
+    }
+    return "";
+  };
 
   const isActive = (href: string) => {
     if (href === "/dashboard") {
@@ -77,13 +135,14 @@ export function Sidebar() {
       {/* شعار النظام */}
       <div className="mb-6 px-3 py-4 text-center">
         <h1 className="text-xl font-bold text-white">نظام أنجز</h1>
-        <p className="mt-1 text-xs text-primary-200">حصر المنجزات</p>
+        <p className="mt-1 text-xs text-primary-200">ج33 - قسم الاحصاء</p>
       </div>
 
       {/* عناصر القائمة */}
       {items.map((item) => {
         const Icon = item.icon;
         const active = isActive(item.href);
+        const badgeCount = getBadgeCount(item.badgeKey);
         return (
           <Link
             key={item.href}
@@ -97,7 +156,15 @@ export function Sidebar() {
             )}
           >
             <Icon className="h-5 w-5 shrink-0" />
-            <span>{item.label}</span>
+            <span className="flex-1">{item.label}</span>
+            {badgeCount > 0 && (
+              <span
+                className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-white text-xs font-bold"
+                title={getBadgeTitle(item.badgeKey, badgeCount)}
+              >
+                {formatNumber(badgeCount)}
+              </span>
+            )}
           </Link>
         );
       })}

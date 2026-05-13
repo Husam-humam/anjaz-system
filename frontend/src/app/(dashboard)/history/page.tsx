@@ -3,27 +3,25 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getSubmissions } from "@/lib/api/submissions";
-import type { WeeklySubmission, SubmissionAnswer } from "@/types/submissions";
-import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
+import type { WeeklySubmission } from "@/types/submissions";
+import { useAuthStore } from "@/stores/authStore";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { Eye, Clock } from "lucide-react";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, formatNumber } from "@/lib/utils";
+import {
+  SubmissionDetailModal,
+  type ScopeUnitRef,
+} from "@/components/shared/SubmissionDetailModal";
 
 export default function HistoryPage() {
-  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-  const [selectedSubmission, setSelectedSubmission] =
-    useState<WeeklySubmission | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<number | null>(null);
+  const [selectedScope, setSelectedScope] = useState<ScopeUnitRef | null>(null);
 
   const {
     data: submissionsData,
@@ -35,9 +33,14 @@ export default function HistoryPage() {
     queryFn: () => getSubmissions(),
   });
 
-  const viewDetails = (submission: WeeklySubmission) => {
-    setSelectedSubmission(submission);
-    setDetailDialogOpen(true);
+  const openDetail = (submission: WeeklySubmission) => {
+    setSelectedPeriodId(submission.weekly_period);
+    setSelectedScope({
+      id: submission.qism,
+      name: submission.qism_name,
+      unit_type: "qism",
+    });
+    setDetailOpen(true);
   };
 
   const submissions = submissionsData?.results || [];
@@ -50,55 +53,51 @@ export default function HistoryPage() {
     return <ErrorState onRetry={() => refetch()} />;
   }
 
+  const approvedCount = submissions.filter(
+    (s: WeeklySubmission) => s.status === "approved"
+  ).length;
+  const submittedCount = submissions.filter(
+    (s: WeeklySubmission) => s.status === "submitted"
+  ).length;
+  const draftCount = submissions.filter(
+    (s: WeeklySubmission) => s.status === "draft"
+  ).length;
+
   return (
     <div className="space-y-6">
       {/* العنوان */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">سجل المنجزات</h1>
         <p className="text-gray-500 mt-1">
-          عرض جميع المنجزات الأسبوعية المقدمة سابقاً
+          {user?.role === "section_manager"
+            ? "عرض جميع منجزاتك الأسبوعية السابقة"
+            : "عرض جميع المنجزات الأسبوعية المقدمة سابقاً"}
         </p>
       </div>
 
       {/* ملخص */}
       {submissions.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl border p-4 text-center">
-            <div className="text-2xl font-bold text-gray-900">
-              {submissions.length}
-            </div>
-            <div className="text-sm text-gray-500">إجمالي المنجزات</div>
-          </div>
-          <div className="bg-white rounded-xl border p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {
-                submissions.filter(
-                  (s: WeeklySubmission) => s.status === "approved"
-                ).length
-              }
-            </div>
-            <div className="text-sm text-gray-500">معتمدة</div>
-          </div>
-          <div className="bg-white rounded-xl border p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {
-                submissions.filter(
-                  (s: WeeklySubmission) => s.status === "submitted"
-                ).length
-              }
-            </div>
-            <div className="text-sm text-gray-500">مُرسلة</div>
-          </div>
-          <div className="bg-white rounded-xl border p-4 text-center">
-            <div className="text-2xl font-bold text-gray-600">
-              {
-                submissions.filter(
-                  (s: WeeklySubmission) => s.status === "draft"
-                ).length
-              }
-            </div>
-            <div className="text-sm text-gray-500">مسودات</div>
-          </div>
+          <StatCard
+            label="إجمالي المنجزات"
+            value={formatNumber(submissions.length)}
+            color="text-gray-900"
+          />
+          <StatCard
+            label="معتمدة"
+            value={formatNumber(approvedCount)}
+            color="text-green-600"
+          />
+          <StatCard
+            label="مُرسلة"
+            value={formatNumber(submittedCount)}
+            color="text-blue-600"
+          />
+          <StatCard
+            label="مسودات"
+            value={formatNumber(draftCount)}
+            color="text-gray-600"
+          />
         </div>
       )}
 
@@ -114,6 +113,11 @@ export default function HistoryPage() {
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">
                     الأسبوع
                   </th>
+                  {user?.role !== "section_manager" && (
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700">
+                      القسم
+                    </th>
+                  )}
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">
                     الحالة
                   </th>
@@ -140,11 +144,16 @@ export default function HistoryPage() {
                         {sub.period_display}
                       </div>
                     </td>
+                    {user?.role !== "section_manager" && (
+                      <td className="py-3 px-4 text-gray-700">
+                        {sub.qism_name}
+                      </td>
+                    )}
                     <td className="py-3 px-4">
                       <StatusBadge status={sub.status} />
                     </td>
-                    <td className="py-3 px-4 text-gray-600">
-                      {sub.answers?.length || 0} إجابة
+                    <td className="py-3 px-4 text-gray-600" dir="ltr">
+                      {formatNumber(sub.answers?.length || 0)}
                     </td>
                     <td className="py-3 px-4 text-gray-600 text-xs">
                       {sub.submitted_at
@@ -160,7 +169,7 @@ export default function HistoryPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => viewDetails(sub)}
+                        onClick={() => openDetail(sub)}
                       >
                         <Eye className="w-4 h-4 ml-1" />
                         عرض
@@ -174,102 +183,36 @@ export default function HistoryPage() {
         )}
       </div>
 
-      {/* مربع حوار التفاصيل */}
-      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>تفاصيل المنجز</DialogTitle>
-            <DialogDescription>
-              {selectedSubmission?.qism_name} —{" "}
-              {selectedSubmission?.period_display}
-            </DialogDescription>
-          </DialogHeader>
+      {/* Modal تفاصيل المنجز الموحّد */}
+      <SubmissionDetailModal
+        periodId={selectedPeriodId}
+        scope={selectedScope}
+        open={detailOpen}
+        onClose={() => {
+          setDetailOpen(false);
+          setSelectedPeriodId(null);
+          setSelectedScope(null);
+        }}
+      />
+    </div>
+  );
+}
 
-          {selectedSubmission && (
-            <div className="space-y-4 py-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">الحالة:</span>
-                  <StatusBadge status={selectedSubmission.status} />
-                </div>
-                {selectedSubmission.submitted_at && (
-                  <span className="text-xs text-gray-400">
-                    تاريخ الإرسال:{" "}
-                    {formatDateTime(selectedSubmission.submitted_at)}
-                  </span>
-                )}
-              </div>
-
-              {selectedSubmission.notes && (
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <span className="text-sm text-gray-500">ملاحظات: </span>
-                  <span className="text-sm text-gray-900">
-                    {selectedSubmission.notes}
-                  </span>
-                </div>
-              )}
-
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                        #
-                      </th>
-                      <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                        المؤشر
-                      </th>
-                      <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                        القيمة
-                      </th>
-                      <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                        نوعي
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {selectedSubmission.answers?.map(
-                      (answer: SubmissionAnswer, idx: number) => (
-                        <tr key={answer.id}>
-                          <td className="py-2 px-3 text-gray-500">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2 px-3 text-gray-900">
-                            {answer.indicator_name}
-                          </td>
-                          <td className="py-2 px-3 text-gray-700" dir="ltr">
-                            {answer.indicator_unit_type === "text"
-                              ? answer.text_value || "—"
-                              : answer.numeric_value?.toLocaleString(
-                                  "ar-IQ"
-                                ) ?? "—"}
-                          </td>
-                          <td className="py-2 px-3">
-                            {answer.is_qualitative ? (
-                              <div>
-                                <StatusBadge
-                                  status={answer.qualitative_status}
-                                />
-                                {answer.qualitative_details && (
-                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                    {answer.qualitative_details}
-                                  </p>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-xs">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+function StatCard({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color: string;
+}) {
+  return (
+    <div className="bg-white rounded-xl border p-4 text-center">
+      <div className={`text-2xl font-bold ${color}`} dir="ltr">
+        {value}
+      </div>
+      <div className="text-sm text-gray-500 mt-1">{label}</div>
     </div>
   );
 }

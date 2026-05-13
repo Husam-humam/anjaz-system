@@ -1,26 +1,43 @@
 "use client";
 
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthHasHydrated, useAuthStore } from "@/stores/authStore";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 // المسارات المتاحة فقط لمدير قسم الإحصاء
-const ADMIN_ONLY_ROUTES = ["/users", "/periods", "/organization"];
-// المسارات المتاحة لمدير الإحصاء وقسم التخطيط
-const ADMIN_PLANNING_ROUTES = ["/approvals", "/targets", "/indicators"];
+const ADMIN_ONLY_ROUTES = [
+  "/users",
+  "/periods",
+  "/organization",
+  "/achievements",
+];
+// المسارات المتاحة لمدير الإحصاء وقسم التخطيط (محظورة على section_manager)
+const ADMIN_PLANNING_ROUTES = [
+  "/approvals",
+  "/targets",
+  "/indicators",
+  "/reports",
+  "/forms",
+];
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { user, token } = useAuthStore();
+  const hasHydrated = useAuthHasHydrated();
+  const user = useAuthStore((s) => s.user);
+  const token = useAuthStore((s) => s.token);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
+    // لا نتخذ أي قرار قبل اكتمال استرجاع الـ auth من localStorage
+    if (!hasHydrated) return;
+
     if (!token) {
       router.replace("/login");
       return;
@@ -35,10 +52,7 @@ export default function DashboardLayout({
           router.replace("/dashboard");
           return;
         }
-        if (
-          ADMIN_PLANNING_ROUTES.some((r) => pathname.startsWith(r)) &&
-          pathname !== "/approvals"
-        ) {
+        if (ADMIN_PLANNING_ROUTES.some((r) => pathname.startsWith(r))) {
           router.replace("/dashboard");
           return;
         }
@@ -52,7 +66,16 @@ export default function DashboardLayout({
         }
       }
     }
-  }, [token, user, pathname, router]);
+  }, [hasHydrated, token, user, pathname, router]);
+
+  // شاشة تحميل أثناء استرجاع الـ auth (تجنّب وميض "تسجيل دخول")
+  if (!hasHydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
 
   if (!token) return null;
 

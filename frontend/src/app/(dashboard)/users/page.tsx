@@ -22,7 +22,8 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, Search, Pencil } from "lucide-react";
+import { Plus, Search, Pencil, AlertCircle, Info } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 
 interface UserFormData {
   username: string;
@@ -114,6 +115,17 @@ export default function UsersPage() {
     setDialogOpen(false);
     setFormData(initialFormData);
     setEditingId(null);
+    createMutation.reset();
+    updateMutation.reset();
+  };
+
+  // عند تغيير الدور، نمسح الوحدة المختارة لأن القائمة ستتغيّر
+  const handleRoleChange = (newRole: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      role: newRole,
+      unit: prev.role === newRole ? prev.unit : undefined,
+    }));
   };
 
   const handleSubmit = () => {
@@ -150,6 +162,37 @@ export default function UsersPage() {
   const isMutating = createMutation.isPending || updateMutation.isPending;
   const users = usersData?.results || [];
   const units = unitsData?.results || [];
+
+  // تصفية الوحدات حسب الدور المختار — كل دور يحتاج نوع قسم مختلف
+  const getFilteredUnitsForRole = (role: string): OrganizationUnit[] => {
+    if (role === "statistics_admin") {
+      return units.filter(
+        (u: OrganizationUnit) =>
+          u.unit_type === "qism" && u.qism_role === "statistics"
+      );
+    }
+    if (role === "planning_section") {
+      return units.filter(
+        (u: OrganizationUnit) =>
+          u.unit_type === "qism" && u.qism_role === "planning"
+      );
+    }
+    if (role === "section_manager") {
+      return units.filter(
+        (u: OrganizationUnit) =>
+          u.unit_type === "qism" && u.qism_role === "regular"
+      );
+    }
+    return [];
+  };
+
+  const filteredUnitsForForm = getFilteredUnitsForRole(formData.role);
+
+  // مساعد لعرض التسمية الكاملة (اسم القسم + الأب) لوضوح أكبر
+  const formatUnitLabel = (unit: OrganizationUnit): string => {
+    const parentName = unit.parent_name ? ` — ${unit.parent_name}` : "";
+    return `${unit.name}${parentName}`;
+  };
 
   if (isLoading) {
     return <LoadingSpinner size="lg" />;
@@ -295,7 +338,10 @@ export default function UsersPage() {
       </div>
 
       {/* مربع حوار الإضافة/التعديل */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -307,6 +353,15 @@ export default function UsersPage() {
                 : "أدخل بيانات المستخدم الجديد"}
             </DialogDescription>
           </DialogHeader>
+
+          {(createMutation.isError || updateMutation.isError) && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                {getErrorMessage(createMutation.error || updateMutation.error)}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-4 py-4">
             {!editingId && (
@@ -361,9 +416,7 @@ export default function UsersPage() {
               <select
                 id="user-role"
                 value={formData.role}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, role: e.target.value }))
-                }
+                onChange={(e) => handleRoleChange(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
                 dir="rtl"
               >
@@ -376,7 +429,13 @@ export default function UsersPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="user-unit">الوحدة التنظيمية</Label>
+              <Label htmlFor="user-unit">
+                {formData.role === "planning_section"
+                  ? "قسم التخطيط"
+                  : formData.role === "statistics_admin"
+                  ? "قسم الإحصاء"
+                  : "قسم العمل"}
+              </Label>
               <select
                 id="user-unit"
                 value={formData.unit?.toString() || ""}
@@ -388,14 +447,36 @@ export default function UsersPage() {
                 }
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
                 dir="rtl"
+                disabled={filteredUnitsForForm.length === 0}
               >
-                <option value="">اختر الوحدة التنظيمية</option>
-                {units.map((unit: OrganizationUnit) => (
+                <option value="">
+                  {filteredUnitsForForm.length === 0
+                    ? "لا توجد أقسام متاحة لهذا الدور"
+                    : "-- اختر --"}
+                </option>
+                {filteredUnitsForForm.map((unit: OrganizationUnit) => (
                   <option key={unit.id} value={unit.id.toString()}>
-                    {unit.name} ({unit.code})
+                    {formatUnitLabel(unit)}
                   </option>
                 ))}
               </select>
+              {formData.role === "planning_section" && (
+                <div className="bg-blue-50 border border-blue-100 rounded-md p-2 flex items-start gap-2">
+                  <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-700">
+                    مدير التخطيط يُربط بـ <b>قسم تخطيط</b> تحت دائرة أو مديرية،
+                    ونطاقه = كل الأقسام العادية تحت نفس الأب. لإنشاء مدير تخطيط
+                    لدائرة كاملة، أنشئ قسم تخطيط تحت الدائرة مباشرة من صفحة
+                    "الهيكل التنظيمي".
+                  </p>
+                </div>
+              )}
+              {filteredUnitsForForm.length === 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
+                  ⚠️ لا يوجد أي قسم مناسب لهذا الدور. أنشئه من صفحة الهيكل
+                  التنظيمي أولاً.
+                </p>
+              )}
             </div>
           </div>
 

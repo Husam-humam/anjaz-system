@@ -87,58 +87,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* تقدم المستهدفات */}
-      {summary?.target_progress && summary.target_progress.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-semibold mb-4">المستهدفات السنوية</h2>
-          <div className="space-y-4">
-            {summary.target_progress.map(
-              (
-                target: {
-                  indicator_name: string;
-                  qism_name: string;
-                  cumulative_value: number;
-                  target_value: number;
-                  progress_percentage: number;
-                },
-                idx: number
-              ) => (
-                <div key={idx}>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm font-medium text-gray-700">
-                      {target.indicator_name}
-                      {user?.role !== "section_manager" && (
-                        <span className="text-gray-400 text-xs mr-2">
-                          ({target.qism_name})
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      {target.cumulative_value.toLocaleString("ar-IQ")} /{" "}
-                      {target.target_value.toLocaleString("ar-IQ")} (
-                      {target.progress_percentage}%)
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className={`h-2.5 rounded-full transition-all ${
-                        target.progress_percentage >= 90
-                          ? "bg-green-500"
-                          : target.progress_percentage >= 50
-                          ? "bg-blue-500"
-                          : "bg-amber-500"
-                      }`}
-                      style={{
-                        width: `${Math.min(target.progress_percentage, 100)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-        </div>
-      )}
+      {/* قسم المستهدفات مُلغى من الدشبورد — يظهر في صفحة التقارير (تبويب المستهدفات) */}
 
       {/* توزيع الحالات */}
       {summary?.status_breakdown && (

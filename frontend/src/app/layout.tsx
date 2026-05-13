@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "نظام أنجز - حصر المنجزات",
-  description: "نظام حصر المنجزات الإداري المؤسسي",
+  title: "نظام أنجز - ج33 - قسم الاحصاء",
+  description: " ج33 - قسم الاحصاء  ",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl">
-      <body className="font-arabic antialiased">
+      <body className="font-arabic antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

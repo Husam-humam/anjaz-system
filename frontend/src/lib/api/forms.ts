@@ -52,6 +52,18 @@ export async function rejectFormTemplate(id: number, rejectionReason: string): P
   return data;
 }
 
+export async function createNewVersion(id: number): Promise<FormTemplate> {
+  const { data } = await apiClient.post<FormTemplate>(`/forms/templates/${id}/new-version/`);
+  return data;
+}
+
+export async function getPendingFormTemplatesCount(): Promise<number> {
+  const { data } = await apiClient.get<{ count: number }>(
+    "/forms/templates/pending-count/"
+  );
+  return data.count;
+}
+
 export async function getActiveTemplate(qismId: number): Promise<FormTemplate> {
   const { data } = await apiClient.get<FormTemplate>("/forms/templates/active/", {
     params: { qism_id: qismId },

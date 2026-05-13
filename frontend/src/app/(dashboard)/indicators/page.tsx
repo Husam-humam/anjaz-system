@@ -25,7 +25,8 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, Search, Pencil } from "lucide-react";
+import { Plus, Search, Pencil, AlertCircle } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 
 interface IndicatorFormData {
   name: string;
@@ -113,6 +114,19 @@ export default function IndicatorsPage() {
     setDialogOpen(false);
     setFormData(initialFormData);
     setEditingId(null);
+    createMutation.reset();
+    updateMutation.reset();
+  };
+
+  // عند تغيير نوع الوحدة، اضبط طريقة التجميع تلقائياً للنص
+  const handleUnitTypeChange = (newUnitType: Indicator["unit_type"]) => {
+    setFormData((prev) => ({
+      ...prev,
+      unit_type: newUnitType,
+      // المؤشرات النصية يجب أن تستخدم "آخر قيمة" فقط
+      accumulation_type:
+        newUnitType === "text" ? "last_value" : prev.accumulation_type,
+    }));
   };
 
   const handleSubmit = () => {
@@ -286,7 +300,10 @@ export default function IndicatorsPage() {
       </div>
 
       {/* مربع حوار الإضافة/التعديل */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -298,6 +315,17 @@ export default function IndicatorsPage() {
                 : "أدخل بيانات المؤشر الجديد"}
             </DialogDescription>
           </DialogHeader>
+
+          {(createMutation.isError || updateMutation.isError) && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                {getErrorMessage(
+                  createMutation.error || updateMutation.error
+                )}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -336,10 +364,7 @@ export default function IndicatorsPage() {
                   id="ind-unit"
                   value={formData.unit_type}
                   onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      unit_type: e.target.value as Indicator["unit_type"],
-                    }))
+                    handleUnitTypeChange(e.target.value as Indicator["unit_type"])
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
                   dir="rtl"
@@ -364,15 +389,25 @@ export default function IndicatorsPage() {
                         .value as Indicator["accumulation_type"],
                     }))
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
+                  disabled={formData.unit_type === "text"}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right disabled:opacity-60 disabled:cursor-not-allowed"
                   dir="rtl"
                 >
-                  {Object.entries(ACCUMULATION_TYPE_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
+                  {Object.entries(ACCUMULATION_TYPE_LABELS)
+                    .filter(([key]) =>
+                      formData.unit_type === "text" ? key === "last_value" : true
+                    )
+                    .map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
                 </select>
+                {formData.unit_type === "text" && (
+                  <p className="text-xs text-gray-500">
+                    المؤشرات النصية تستخدم "آخر قيمة" فقط
+                  </p>
+                )}
               </div>
             </div>
 

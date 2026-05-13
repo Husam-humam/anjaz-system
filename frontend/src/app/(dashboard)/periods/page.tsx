@@ -27,8 +27,16 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { Plus, Lock, Eye } from "lucide-react";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { Plus, Lock, Eye, AlertCircle, Zap, Calendar as CalendarIcon } from "lucide-react";
+import { formatDate, formatDateTime, formatPercent, getErrorMessage } from "@/lib/utils";
+import {
+  HierarchicalTree,
+  useBuildHierarchy,
+} from "@/app/(dashboard)/reports/HierarchicalTree";
+import {
+  SubmissionDetailModal,
+  type ScopeUnitRef,
+} from "@/components/shared/SubmissionDetailModal";
 
 interface PeriodFormData {
   year: number;
@@ -36,6 +44,102 @@ interface PeriodFormData {
   start_date: string;
   end_date: string;
   deadline: string;
+}
+
+// خريطة الحالات بلون متوافق مع عرض الشجرة
+const STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
+  approved: { label: "معتمد", color: "text-green-700 bg-green-50" },
+  submitted: { label: "مُرسل", color: "text-blue-700 bg-blue-50" },
+  late: { label: "متأخر", color: "text-red-700 bg-red-50" },
+  draft: { label: "مسودة", color: "text-amber-700 bg-amber-50" },
+  extended: { label: "مُمدَّد", color: "text-purple-700 bg-purple-50" },
+  returned: { label: "مُرجَع", color: "text-pink-700 bg-pink-50" },
+  not_submitted: { label: "غير مُقدَّم", color: "text-gray-600 bg-gray-100" },
+};
+
+/**
+ * مكوّن شجري لعرض الالتزام بشكل هرمي (دائرة → مديرية → قسم).
+ * يعتمد على `complianceData.sections` المسطّحة ويبني الشجرة تلقائياً.
+ */
+function ComplianceTree({
+  sections,
+  onNodeClick,
+}: {
+  sections: Array<{ qism_id: number; qism_name: string; status: string }>;
+  onNodeClick?: (scope: ScopeUnitRef) => void;
+}) {
+  const tree = useBuildHierarchy(
+    sections,
+    ({ unit, descendantQismIds, ownData }) => {
+      // عقدة قسم: تعرض الحالة مباشرة
+      if (unit.unit_type === "qism" && ownData) {
+        const display = STATUS_DISPLAY[ownData.status] || {
+          label: ownData.status,
+          color: "text-gray-700 bg-gray-50",
+        };
+        return {
+          status: (
+            <span
+              className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${display.color}`}
+            >
+              {display.label}
+            </span>
+          ),
+          rate: "—",
+        };
+      }
+
+      // عقدة دائرة/مديرية: نحسب إجمالي الأقسام الفرعية + نسبة الالتزام
+      const relevantSections = sections.filter((s) =>
+        descendantQismIds.includes(s.qism_id)
+      );
+      if (relevantSections.length === 0) {
+        return { status: "—", rate: "—" };
+      }
+
+      const total = relevantSections.length;
+      const compliant = relevantSections.filter(
+        (s) => s.status === "approved" || s.status === "submitted"
+      ).length;
+      const rate = total > 0 ? (compliant / total) * 100 : 0;
+      const rateColor =
+        rate >= 90 ? "text-green-700" : rate >= 50 ? "text-blue-700" : "text-red-700";
+
+      return {
+        status: (
+          <span className="text-sm font-medium text-gray-700">
+            {compliant} <span className="text-gray-400">/</span> {total} قسم
+          </span>
+        ),
+        rate: (
+          <span className={`font-bold ${rateColor}`}>
+            {formatPercent(rate)}
+          </span>
+        ),
+      };
+    },
+    { includeEmpty: true }
+  );
+
+  return (
+    <HierarchicalTree
+      data={tree}
+      columns={[
+        { key: "status", label: "الحالة / الملتزم", align: "left" },
+        { key: "rate", label: "نسبة الالتزام", align: "left" },
+      ]}
+      onNodeClick={
+        onNodeClick
+          ? (node) =>
+              onNodeClick({
+                id: node.unit_id,
+                name: node.unit_name,
+                unit_type: node.unit_type,
+              })
+          : undefined
+      }
+    />
+  );
 }
 
 export default function PeriodsPage() {
@@ -47,6 +151,9 @@ export default function PeriodsPage() {
   const [closingPeriodId, setClosingPeriodId] = useState<number | null>(null);
   const [complianceDialogOpen, setComplianceDialogOpen] = useState(false);
   const [selectedPeriodId, setSelectedPeriodId] = useState<number | null>(null);
+  const [submissionDetailOpen, setSubmissionDetailOpen] = useState(false);
+  const [submissionDetailScope, setSubmissionDetailScope] =
+    useState<ScopeUnitRef | null>(null);
   const [formData, setFormData] = useState<PeriodFormData>({
     year: currentYear,
     week_number: 1,
@@ -92,6 +199,15 @@ export default function PeriodsPage() {
     },
   });
 
+  // مسح خطأ الإنشاء عند فتح/إغلاق الـ dialog
+  const handleDialogChange = (open: boolean) => {
+    setDialogOpen(open);
+    if (!open) {
+      createMutation.reset();
+      resetForm();
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       year: currentYear,
@@ -124,6 +240,11 @@ export default function PeriodsPage() {
 
   const periods = periodsData?.results || [];
 
+  // حساب الأسبوع الحالي (أحدث فترة مفتوحة)
+  const currentPeriod = periods.find(
+    (p: WeeklyPeriod) => p.status === "open"
+  );
+
   if (isLoading) {
     return <LoadingSpinner size="lg" />;
   }
@@ -144,10 +265,54 @@ export default function PeriodsPage() {
             فتح وإغلاق الأسابيع ومتابعة الالتزام
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button onClick={() => setDialogOpen(true)} variant="outline">
           <Plus className="w-4 h-4 ml-2" />
-          فتح أسبوع جديد
+          فتح أسبوع يدوياً
         </Button>
+      </div>
+
+      {/* بطاقة الأسبوع الحالي — الإدارة التلقائية */}
+      <div className="relative bg-gradient-to-l from-primary-50 to-blue-50 border border-primary-200 rounded-xl p-5 overflow-hidden">
+        <div className="absolute top-0 left-0 w-32 h-32 bg-primary-100/40 rounded-full blur-3xl -translate-x-8 -translate-y-8" />
+        <div className="relative flex items-start justify-between flex-wrap gap-4">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-12 h-12 bg-primary-600 rounded-lg flex items-center justify-center shadow-sm">
+              <CalendarIcon className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-sm font-medium text-primary-700">
+                  الأسبوع الحالي
+                </h2>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary-600 text-white text-xs font-medium rounded-full">
+                  <Zap className="w-3 h-3" />
+                  مُدار تلقائياً
+                </span>
+              </div>
+              {currentPeriod ? (
+                <>
+                  <p className="text-xl font-bold text-gray-900">
+                    الأسبوع {currentPeriod.week_number} / {currentPeriod.year}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {formatDate(currentPeriod.start_date)} — {formatDate(currentPeriod.end_date)}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    الموعد النهائي: {formatDateTime(currentPeriod.deadline)}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-600 mt-1">
+                  لا يوجد أسبوع مفتوح حالياً. سيُنشأ تلقائياً في بداية الأسبوع القادم.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="text-xs text-gray-500 max-w-xs">
+            💡 يُنشئ النظام الأسبوع الحالي تلقائياً ويُغلق السابق بعد انتهاء الموعد النهائي.
+            يمكن تعديل الإعدادات من لوحة تحكم Django.
+          </div>
+        </div>
       </div>
 
       {/* فلتر السنة */}
@@ -255,7 +420,7 @@ export default function PeriodsPage() {
       </div>
 
       {/* مربع حوار فتح أسبوع جديد */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>فتح أسبوع جديد</DialogTitle>
@@ -263,6 +428,15 @@ export default function PeriodsPage() {
               أدخل بيانات الفترة الأسبوعية الجديدة
             </DialogDescription>
           </DialogHeader>
+
+          {createMutation.isError && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">
+                {getErrorMessage(createMutation.error)}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
@@ -358,7 +532,7 @@ export default function PeriodsPage() {
             >
               {createMutation.isPending ? "جارٍ الإنشاء..." : "فتح الأسبوع"}
             </Button>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => handleDialogChange(false)}>
               إلغاء
             </Button>
           </DialogFooter>
@@ -377,9 +551,20 @@ export default function PeriodsPage() {
         loading={closeMutation.isPending}
       />
 
+      {/* Modal تفاصيل المنجز (قسم / مديرية / دائرة) */}
+      <SubmissionDetailModal
+        periodId={selectedPeriodId}
+        scope={submissionDetailScope}
+        open={submissionDetailOpen}
+        onClose={() => {
+          setSubmissionDetailOpen(false);
+          setSubmissionDetailScope(null);
+        }}
+      />
+
       {/* مربع حوار الالتزام */}
       <Dialog open={complianceDialogOpen} onOpenChange={setComplianceDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>متابعة الالتزام</DialogTitle>
             <DialogDescription>
@@ -443,35 +628,21 @@ export default function PeriodsPage() {
                 </div>
               )}
 
-              {/* التفاصيل */}
+              {/* التفاصيل بشكل شجري (دائرة → مديرية → قسم) */}
               {complianceData.sections && complianceData.sections.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-gray-50">
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                          القسم
-                        </th>
-                        <th className="text-right py-2 px-3 font-semibold text-gray-700">
-                          الحالة
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {complianceData.sections.map(
-                        (section: ComplianceData["sections"][0]) => (
-                          <tr key={section.qism_id}>
-                            <td className="py-2 px-3 text-gray-900">
-                              {section.qism_name}
-                            </td>
-                            <td className="py-2 px-3">
-                              <StatusBadge status={section.status} />
-                            </td>
-                          </tr>
-                        )
-                      )}
-                    </tbody>
-                  </table>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 px-1">
+                    💡 اضغط على سهم التوسيع لرؤية الأقسام، واضغط "عرض" لفتح تفاصيل منجز قسم أو تجميع مديرية/دائرة
+                  </p>
+                  <div className="max-h-[50vh] overflow-y-auto">
+                    <ComplianceTree
+                      sections={complianceData.sections}
+                      onNodeClick={(scope) => {
+                        setSubmissionDetailScope(scope);
+                        setSubmissionDetailOpen(true);
+                      }}
+                    />
+                  </div>
                 </div>
               )}
             </div>
