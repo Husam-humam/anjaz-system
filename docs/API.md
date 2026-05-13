@@ -15,10 +15,12 @@
 | Organization | ✅ CRUD | 👁 Read | 👁 Read (own) |
 | Users | ✅ CRUD | ❌ | ❌ |
 | Indicators | ✅ CRUD | 👁 Read | 👁 Read |
-| Form Templates | ✅ Approve | ✅ CRUD | 👁 Read (own) |
+| Form Templates | ✅ Approve | ✅ CRUD + Approve (scope) | 👁 Read (own) |
 | Targets | ✅ CRUD | 👁 Read | 👁 Read (own) |
 | Weekly Periods | ✅ CRUD | 👁 Read | 👁 Read |
-| Submissions | 👁 Read All | ✅ Approve (own) | ✅ CRUD (own) |
+| Submissions | ✅ Admin Review (all) | ✅ Approve (scope) | ✅ CRUD (own) |
+| Admin Review (`admin-*`) | ✅ | ❌ | ❌ |
+| Audit Log | ✅ All | 👁 Read (scope) | 👁 Read (own) |
 | Reports | ✅ All | ✅ Own directorate | ✅ Own section |
 | Notifications | ✅ | ✅ | ✅ |
 
@@ -314,13 +316,83 @@ Save answers (partial update allowed for drafts).
 ```
 
 ### POST `/api/submissions/{id}/submit/`  **[section_manager]**
-Transitions `draft → submitted`. Validates mandatory fields.
+Transitions `draft / returned / extended / returned_by_admin → submitted`. Validates mandatory fields.
+Note: `returned_by_admin` is accepted even after the weekly deadline has passed.
 
 ### POST `/api/submissions/{id}/approve/`  **[planning_section]**
-Transitions `submitted → approved`.  
+Transitions `submitted | returned_by_admin → approved`.
+Resets `admin_reviewed_*` fields so the admin must re-review the (possibly modified) submission.
 Also transitions qualitative answers to `pending_statistics`.
 
-### GET `/api/submissions/{id}/history/`  **[section_manager, planning_section]**
+### POST `/api/submissions/{id}/reject/`  **[planning_section]**
+Transitions `submitted | returned_by_admin → returned`.
+Body: `{ "reason": "سبب الإرجاع" }` (required).
+
+### POST `/api/submissions/{id}/admin-approve/`  **[statistics_admin]**
+Admin (statistics) reviews and approves the submission. No body required, no reason needed.
+Stays as `approved` — only marks `admin_reviewed_at`, `admin_reviewed_by`, `admin_review_action='approved'`.
+Fails with 400 if `admin_reviewed_at` is already set (one-shot review).
+
+### POST `/api/submissions/{id}/admin-edit/`  **[statistics_admin]**
+Admin edits answer values with a mandatory reason. Audit log records old→new per field.
+```json
+{
+  "reason": "تصحيح خطأ إدخال — الرقم 250 وليس 100",
+  "answer_edits": [
+    {"answer_id": 42, "numeric_value": 250},
+    {"answer_id": 43, "text_value": "نص مُحدَّث"}
+  ]
+}
+```
+Returns 400 if reason is empty, if no actual values changed, or if already reviewed.
+
+### POST `/api/submissions/{id}/admin-return/`  **[statistics_admin]**
+Admin returns the submission to planning with a mandatory reason. Status transitions `approved → returned_by_admin` (excluded from statistics until re-approved).
+```json
+{ "reason": "أرقام تحتاج إعادة تحقّق من المصدر" }
+```
+
+### GET `/api/submissions/{id}/audit-log/`  **[section_manager(own), planning_section(scope), statistics_admin]**
+Returns the full timeline of actions for this submission.
+```json
+{
+  "results": [
+    {
+      "id": 17,
+      "action_type": "submission_admin_edited",
+      "action_label": "تعديل منجز من الإحصاء",
+      "actor_id": 5,
+      "actor_name": "أحمد علي",
+      "actor_role": "statistics_admin",
+      "field_changes": [
+        {
+          "field": "numeric_value",
+          "answer_id": 42,
+          "indicator_id": 7,
+          "indicator_name": "عدد الزيارات",
+          "old": "100",
+          "new": "250"
+        }
+      ],
+      "reason": "تصحيح خطأ إدخال",
+      "metadata": null,
+      "created_at": "2026-05-14T10:30:00Z"
+    }
+  ]
+}
+```
+
+### GET `/api/submissions/pending-admin-review/`  **[statistics_admin]**
+Paginated list of submissions awaiting admin review (approved by planning, not yet reviewed by admin).
+**Query params:**
+- `reviewed`: `"true"` (only reviewed) / `"false"` (only pending) / omit (all)
+- `year`, `week` — period filters
+- `daira_id`, `mudiriya_id`, `qism_id` — organizational filters (cascading)
+- `page`, `page_size` — pagination
+
+Used by the `/achievements` admin page. Also used (with `page_size=1`) for the sidebar badge counter.
+
+### GET `/api/submissions/{id}/history/`  **[section_manager, planning_section, statistics_admin]**
 Returns past submissions for a section.
 
 ---

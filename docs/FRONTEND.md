@@ -41,32 +41,27 @@
 | Route | Page | Description |
 |---|---|---|
 | `/organization` | الهيكل التنظيمي | Interactive tree view |
-| `/organization/new` | إضافة كيان | Add daira/mudiriya/qism |
-| `/indicators` | بنك المؤشرات | List + manage indicators |
-| `/indicators/categories` | تصنيفات المؤشرات | Manage categories |
+| `/indicators` | بنك المؤشرات | List + manage indicators (+ categories tab) |
 | `/users` | إدارة المستخدمين | List + create + edit users |
-| `/periods` | الأسابيع | List weeks, open/close |
-| `/periods/new` | فتح أسبوع جديد | Create weekly period |
-| `/periods/{id}` | تفاصيل الأسبوع | Compliance view + extensions |
-| `/targets` | المستهدفات | Manage annual targets |
-| `/approvals/forms` | اعتماد الاستمارات | Pending form templates |
-| `/approvals/qualitative` | اعتماد المنجز النوعي | Pending qualitative items |
-| `/reports` | التقارير | Full institutional reports |
+| `/periods` | الأسابيع | List weeks, open/close, compliance + extensions |
+| `/targets` | المستهدفات | Manage hierarchical annual targets |
+| `/forms` | قوالب الاستمارات | List + create + approve/reject form templates (merged page — replaces old `/approvals/forms`). Shows sidebar badge for pending templates |
+| `/achievements` | المنجزات | **NEW**: admin review page — list approved submissions, filter by week/dairas/mudiriyas/qisms/review-status, open `AdminReviewModal` for approve/edit/return. Sidebar badge shows pending-review count |
+| `/approvals` | المنجزات النوعية بانتظار الاعتماد | Pending qualitative items (Step 3 of qualitative flow) |
+| `/reports` | التقارير | Full institutional reports (PDF/Excel exports carry generation timestamp) |
 
 ### Planning Section
 | Route | Page | Description |
 |---|---|---|
-| `/forms` | استمارات الأقسام | List sections' form templates |
-| `/forms/new` | إنشاء استمارة | Build form from indicators bank |
-| `/forms/{id}` | تفاصيل الاستمارة | View/edit form template |
-| `/approvals` | المنجزات بانتظار الاعتماد | Weekly submissions to approve |
+| `/forms` | قوالب الاستمارات | Create + submit + approve form templates (scoped) |
+| `/approvals` | المنجزات بانتظار الاعتماد | Weekly submissions to approve. Also surfaces submissions returned by admin (status `returned_by_admin`) — planner can edit answers and re-approve, or reject back to section_manager |
 | `/reports` | تقارير المديرية | Scoped to own directorate |
 
 ### Section Manager
 | Route | Page | Description |
 |---|---|---|
-| `/submission` | تقديم المنجز الأسبوعي | Current week's form |
-| `/history` | سجل المنجزات | Past submissions + charts |
+| `/submission` | تقديم المنجز الأسبوعي | Current week's form. `returned_by_admin` is editable always (deadline bypass) |
+| `/history` | سجل المنجزات | Past submissions + charts + audit log per submission |
 | `/reports` | تقارير قسمي | Own section analytics |
 
 ---
@@ -78,7 +73,7 @@
 ```
 ┌─────────────────────────────────────┐
 │            شعار المؤسسة             │
-│      نظام حصر المنجزات الإداري      │
+│      نظام ج33 - قسم الاحصاء       │
 │                                     │
 │  ┌─────────────────────────────┐    │
 │  │     اسم المستخدم            │    │
@@ -214,9 +209,36 @@ Action buttons: إضافة مؤشر, تعديل, تعطيل
 ├───────────────────────────────────────────────────────┤
 │  جدول: الكيان | المؤشر | القيمة | المستهدف | النسبة  │
 ├───────────────────────────────────────────────────────┤
-│  [تصدير PDF]  [تصدير Excel]                          │
+│  [تصدير PDF]  [تصدير Excel]   (Both carry a          │
+│   generation timestamp in the footer/header)         │
 └──────────────────────────────────────────────────────┘
 ```
+
+---
+
+### 3.7 Achievements / Admin Review (`/achievements`)  **[statistics_admin]**
+
+```
+┌──────────────────────────────────────────────────────┐
+│  المنجزات                                            │
+│  [بانتظار: 12]   [إجمالي النتائج: 87]               │
+├──────────────────────────────────────────────────────┤
+│  🔍 بحث  |  سنة ▾  |  أسبوع  |                       │
+│  دائرة ▾  |  مديرية ▾  |  قسم ▾                       │
+│  حالة المراجعة: ( بانتظار ) ( تمّت ) ( الكل )       │
+├──────────────────────────────────────────────────────┤
+│  جدول: القسم | المديرية | الأسبوع | اعتماد التخطيط   │
+│         | حالة المراجعة | إجراء                       │
+└──────────────────────────────────────────────────────┘
+```
+
+Clicking a row opens **`AdminReviewModal`** with two tabs (الإجابات / سجلّ التدقيق)
+and three action buttons (اعتماد / تعديل / إرجاع):
+- **اعتماد**: confirmation chip in the modal, no reason. Locks submission.
+- **تعديل**: switches the answers table to editable inputs (numeric/text per indicator unit type). Qualitative answers are read-only (handled by `/approvals` flow). Highlights changed rows. Requires a mandatory reason. On save, writes audit log with old→new diffs.
+- **إرجاع للتخطيط**: requires a mandatory reason. Status moves to `returned_by_admin`, submission is excluded from statistics until planning re-approves.
+
+Once any admin acts on a submission, the modal shows a purple lock banner with the reviewer's name and timestamp; action buttons are hidden. Sidebar badge auto-refreshes via React Query `invalidateQueries`.
 
 ---
 
@@ -227,10 +249,20 @@ Displays submission/form status with color coding:
 - `draft` → رمادي: مسودة
 - `submitted` → أزرق: مُرسل
 - `approved` → أخضر: معتمد
+- `returned` → كهرماني: مُرجَع للتصحيح
+- `returned_by_admin` → بنفسجي: مُرجَع من الإحصاء
 - `late` → أحمر: متأخر
 - `extended` → برتقالي: مُمدَّد
 - `pending_approval` → أصفر: بانتظار الاعتماد
 - `rejected` → أحمر: مرفوض
+
+### `AdminReviewModal`  (`app/(dashboard)/achievements/AdminReviewModal.tsx`)
+Self-contained 3-mode modal (view/edit/return) for the achievements page.
+Props: `{ submissionId: number | null; open: boolean; onClose: () => void }`.
+Fetches fresh submission via `getSubmission(id)`, computes editable drafts per answer, calls `adminApproveSubmission` / `adminEditSubmission` / `adminReturnSubmission`. Invalidates `pending-admin-review`, sidebar badge, and audit-log queries on success.
+
+### `AuditLogPanel`  (`app/(dashboard)/achievements/AuditLogPanel.tsx`)
+Timeline view of all actions on a submission. Each entry shows action type chip, actor + role, timestamp, reason (if any), and per-field diff cards (old → new) for edit actions. Used inside `AdminReviewModal` and reusable elsewhere.
 
 ### `ProgressBar`
 Shows target achievement:

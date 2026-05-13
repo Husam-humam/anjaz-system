@@ -140,14 +140,22 @@ Notification (recipient_id → User)
 | created_at | TIMESTAMPTZ | |
 | approved_at | TIMESTAMPTZ NULL | |
 
-**UNIQUE:** `(qism_id, version)`
+**UNIQUE:**
+- `(qism_id, version)` — version is sequential per qism.
+- **`(qism_id, effective_from_year, effective_from_week) WHERE status = 'approved'`** — partial unique constraint (`uniq_approved_effective_per_qism`) ensures at most one approved template starts on a given week for a given qism.
 
 **Status Flow:**
 ```
 draft → pending_approval → approved
-                        ↘ rejected → (fix) → pending_approval
-approved → superseded (when new version approved)
+                        ↘ rejected → (must create new version via "new_version")
+approved → superseded
+   (set automatically when a new template is approved for the same qism with
+    effective_from_(year, week) >= the existing one)
 ```
+
+**Approval invariants:**
+- `effective_from` cannot be in the past (`(year, week) >= current_(year, week)`).
+- Approving template T_new for qism Q supersedes any approved template T_old for Q where `T_old.effective_from >= T_new.effective_from` — the older "currently active" template that starts BEFORE the new one remains `approved` and is picked by `get_active_template(qism, week)` until the new template's effective week arrives.
 
 ---
 
@@ -211,17 +219,38 @@ approved → superseded (when new version approved)
 | qism_id | FK | Must be `qism_role = regular` |
 | weekly_period_id | FK | |
 | form_template_id | FK | Snapshot of template version used |
-| status | VARCHAR(15) | `draft` / `submitted` / `approved` / `late` / `extended` |
+| status | VARCHAR(20) | `draft` / `submitted` / `approved` / `returned` / `late` / `extended` / `returned_by_admin` |
 | submitted_at | TIMESTAMPTZ NULL | |
 | planning_approved_by_id | FK → users NULL | |
 | planning_approved_at | TIMESTAMPTZ NULL | |
+| admin_reviewed_at | TIMESTAMPTZ NULL | When admin (statistics) reviewed. NULL = pending admin review |
+| admin_reviewed_by_id | FK → users NULL | Which admin employee reviewed |
+| admin_review_action | VARCHAR(20) | `approved` / `edited` / `returned` (empty if not yet reviewed) |
 | notes | TEXT | |
 
 **UNIQUE:** `(qism_id, weekly_period_id)`
 
+**Status Flow (three-step workflow):**
+```
+draft / returned / extended / returned_by_admin
+   ↓ section_manager submits
+submitted
+   ↓ planning approves            ↘ planning rejects
+approved (counts in statistics)     returned (back to section_manager)
+   ↓ admin reviews (one-shot)
+   ├─ approve  → stays approved (counted, admin_reviewed_at set)
+   ├─ edit     → stays approved (admin modifies values, audit log records diff)
+   └─ return   → returned_by_admin (excluded from statistics)
+                    ↓ planning re-approves or returns
+                  approved / returned
+```
+
 **Editability Logic:**
 ```python
 def is_editable(self):
+    # Exception: returned_by_admin is editable always (delay caused by admin review)
+    if self.status == 'returned_by_admin':
+        return True
     now = timezone.now()
     extension = QismExtension.objects.filter(
         qism=self.qism, weekly_period=self.weekly_period
@@ -232,6 +261,12 @@ def is_editable(self):
         self.weekly_period.status == 'open'
         and now <= self.weekly_period.deadline
     )
+```
+
+**Admin Review Lock (one-shot):**
+```python
+# Once admin_reviewed_at is set, no other admin can act on this submission.
+# Enforced in SubmissionAdminService._assert_reviewable() with select_for_update().
 ```
 
 ---
@@ -306,6 +341,50 @@ def is_editable(self):
 - `submission_approved`
 - `qualitative_pending` — Qualitative achievement awaiting approval
 - `qualitative_approved` / `qualitative_rejected`
+
+---
+
+### 3.13 `audit_log` (app `audit`)
+
+System-wide **append-only** audit trail. Every business action writes one row via `AuditService.log(...)`.
+
+| Column | Type | Description |
+|---|---|---|
+| id | BIGSERIAL PK | |
+| action_type | VARCHAR(50) | See action types below |
+| actor_id | FK → users NULL | The user who performed the action (NULL = system / auto) |
+| actor_role | VARCHAR(30) | Role of actor at time of action (frozen — not affected by later role changes) |
+| target_model | VARCHAR(50) | `WeeklySubmission`, `FormTemplate`, `Target`, `SubmissionAnswer`, `QismExtension`, `WeeklyPeriod` |
+| target_id | BIGINT NULL | PK of the target object |
+| target_repr | VARCHAR(255) | `str(target)` snapshot at time of action |
+| qism_id | FK → organization_units NULL | For fast filtering by qism scope |
+| field_changes | JSONB NULL | List of `{field, old, new, ...}` dicts for edit actions |
+| reason | TEXT | Mandatory for return/edit; empty for approve actions |
+| metadata | JSONB NULL | Flexible context (previous_status, effective_from_week, etc.) |
+| created_at | TIMESTAMPTZ DEFAULT now() | When the action occurred |
+
+**Constraints:**
+- **No UPDATE, no DELETE** from application layer (enforced via Django admin overrides and convention).
+- All writes go through `apps.audit.services.AuditService` — never raw `AuditLog.objects.create()` from outside the service.
+
+**Action Types (`ActionType` enum):**
+
+| Domain | Action types |
+|---|---|
+| Submission | `submission_created`, `submission_saved`, `submission_submitted`, `submission_planning_approved`, `submission_planning_returned`, `submission_admin_approved`, `submission_admin_edited`, `submission_admin_returned` |
+| Qualitative | `qualitative_planning_approved`, `qualitative_planning_rejected`, `qualitative_admin_approved`, `qualitative_admin_rejected` |
+| Form templates | `template_created`, `template_updated`, `template_submitted`, `template_approved`, `template_rejected`, `template_new_version` |
+| Targets | `target_created`, `target_updated`, `target_deleted` |
+| Other | `extension_granted`, `period_opened`, `period_closed` |
+
+**Indexes:**
+- `(target_model, target_id)` — fast lookup of a specific entity's history
+- `action_type`, `actor_id`, `(qism_id, -created_at)`, `-created_at`
+
+**Visibility (`GET /api/submissions/{id}/audit-log/`):**
+- `section_manager`: their own qism's submissions only
+- `planning_section`: submissions within their scope (`_planning_section_scope_qism_ids`)
+- `statistics_admin`: full scope
 
 ---
 

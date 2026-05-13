@@ -22,11 +22,20 @@ A government institution's planning and follow-up directorate manually collects 
 
 A web-based system with three user tiers that digitizes the entire weekly reporting cycle:
 
-1. **Statistics Admin** — Builds the indicators bank, manages users, controls the weekly cycle, sets targets, approves everything.
+1. **Statistics Admin (Central Statistics Dept, ~5–6 employees)** — Builds the indicators bank, manages users, controls the weekly cycle, sets targets, **reviews every approved submission** (approve / edit values / return to planning), maintains audit log.
 2. **Planning Sections** — Build section-specific forms from the indicators bank, approve weekly submissions from their directorate's sections.
 3. **Section Managers** — Fill their weekly achievement form; optionally flag notable achievements as "qualitative."
 
 The system auto-aggregates weekly data into all periodic reports, eliminating redundant data entry entirely.
+
+**Three-step approval workflow for every weekly submission:**
+1. Section manager submits → status `submitted`.
+2. Planning section approves → status `approved` → **counts in statistics immediately**.
+3. One employee from the statistics admin team reviews — one-shot action: `approve` (no reason), `edit` (mandatory reason, values changed with audit trail), or `return` (mandatory reason, moves to `returned_by_admin`, excluded from statistics until planning re-approves).
+
+Once any admin acts on a submission, **no other admin can act on the same submission** (one-shot, locked). The team divides work among themselves (verbally / organizationally) — outside the system's responsibility.
+
+**Statistics independence**: Reports are computed live from the **planning-approved** state. Admin review is a **post-hoc quality layer** that can correct mistakes after the data has already entered statistics, without blocking the timely production of reports.
 
 ---
 
@@ -46,8 +55,11 @@ The system auto-aggregates weekly data into all periodic reports, eliminating re
 | SA-08 | As a statistics admin, I can set annual targets for specific indicators for specific sections |
 | SA-09 | As a statistics admin, I can approve or reject qualitative achievements (second and final approval step) |
 | SA-10 | As a statistics admin, I can view a full institutional dashboard showing all sections' compliance and progress |
-| SA-11 | As a statistics admin, I can export any report as PDF or Excel |
+| SA-11 | As a statistics admin, I can export any report as PDF or Excel (with generation timestamp on every export) |
 | SA-12 | As a statistics admin, I can build and manage the organizational hierarchy (dairas, mudiriyas, qisms) |
+| SA-13 | As a statistics admin, I can view all submissions awaiting my review on the "المنجزات" page, filtered by week / daira / mudiriya / qism |
+| SA-14 | As a statistics admin, I can review a submission once — approve (no reason), edit values (mandatory reason, full audit trail), or return to planning (mandatory reason). After my action, no other admin can re-review the same submission |
+| SA-15 | As a statistics admin, I can view the full audit log timeline for any submission — who did what, when, with what reason, and the exact field-by-field diffs for any edits |
 
 ### Planning Section (قسم التخطيط)
 
@@ -107,13 +119,33 @@ The system auto-aggregates weekly data into all periodic reports, eliminating re
 - Statistics admin can grant per-section extensions with a new deadline.
 - Statistics admin closes the period manually.
 
-### 4.5 Achievement Submission
+### 4.5 Achievement Submission (Three-Step Workflow)
 - Each section fills one submission per week based on their current approved template.
 - Each form item (indicator) accepts: numeric value, text value, or both depending on indicator type.
 - Any answered item can be flagged as a qualitative achievement with mandatory detail text.
-- Qualitative achievements follow a two-step approval process.
-- The planning section approves the full weekly submission (all regular data).
-- Qualitative achievements require additional approval from statistics admin.
+
+**Workflow:**
+1. **Section manager** completes and submits → `submitted`.
+2. **Planning section** approves → `approved`. Submission **enters statistics immediately**. (Or rejects → `returned` → section corrects → re-submit.)
+3. **Statistics admin** reviews — one of three actions, one-shot, locked after:
+   - `admin-approve`: confirms (no reason). Stays `approved`.
+   - `admin-edit`: modifies answer values with a **mandatory reason**. Each old→new change is recorded in the audit log. Stays `approved`.
+   - `admin-return`: returns to planning with a **mandatory reason**. Status moves to `returned_by_admin` and the submission is **excluded from statistics**. Planning either edits & re-approves, or rejects back to section manager.
+
+**Special rules for `returned_by_admin`:**
+- Editable always — the weekly deadline does **not** apply (the delay was caused by admin review, not by the section).
+- Planning may edit answers directly (limited expansion of planning's edit permission, scoped to this status only).
+- When planning re-approves, `admin_reviewed_*` fields are cleared so the admin team must review the new content.
+
+**Qualitative achievements** retain their independent two-step path (planning → statistics admin) for the qualitative items themselves, while the surrounding submission flows through the three-step workflow above.
+
+### 4.5.1 Audit Log (System-Wide)
+- Every state-changing business action writes one row in `audit_log` via `AuditService.log(...)`.
+- Covers: submission lifecycle, qualitative approvals, form template lifecycle, target CRUD, extensions, period open/close.
+- Append-only — no UPDATE, no DELETE from application code.
+- Edits store per-field diffs (`{field, old, new, indicator_name}`) in JSONB.
+- Mandatory reasons (for edits and returns) are stored on the same row.
+- Viewable per submission via `GET /api/submissions/{id}/audit-log/` (scoped to user's role/scope).
 
 ### 4.6 Targets & Progress Tracking
 - Statistics admin sets annual targets per section per indicator.

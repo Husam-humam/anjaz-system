@@ -82,9 +82,10 @@ anjaz_system/
 │   │   ├── indicators/          # Indicators bank
 │   │   ├── forms/               # Form templates
 │   │   ├── targets/             # Annual targets
-│   │   ├── submissions/         # Weekly submissions
+│   │   ├── submissions/         # Weekly submissions + admin review (Step 3)
 │   │   ├── reports/             # Report generation
-│   │   └── notifications/       # In-app notifications
+│   │   ├── notifications/       # In-app notifications + WebSocket
+│   │   └── audit/               # System-wide audit log (append-only)
 │   ├── requirements/
 │   │   ├── base.txt
 │   │   └── development.txt
@@ -158,15 +159,30 @@ cd frontend && npm run test
 ## Key Business Rules (Always Enforce)
 
 1. A `WeeklySubmission` is **editable** only if: the week is open AND deadline not passed, OR a valid `QismExtension` exists.
-2. A `FormTemplate` becomes active on the `effective_from_week` — **never retroactively**.
+   - **Exception**: status `returned_by_admin` is editable always (even after deadline) because the delay was caused by admin review, not the section.
+2. A `FormTemplate` becomes active on the `effective_from_week` — **never retroactively**. Approval is rejected if `(year, week) < (current_year, current_week)`.
 3. Historical submissions are **always linked to the FormTemplate version used at submission time**.
 4. Qualitative achievements require **two-step approval**: planning section → statistics admin.
-5. Targets are **optional** — their absence must not break any calculation.
-6. Report aggregation must respect `accumulation_type`: `sum`, `average`, or `last_value`.
-7. The organization tree allows: Daira→Mudiriya→Qism, Daira→Qism, Mudiriya→Qism (independent).
-8. A `Qism` can never be a parent of another unit.
-9. Only `statistics_admin` can create users, open/close weeks, approve templates, set targets, grant extensions.
-10. Notifications must be created automatically on every status change event.
+5. **Three-step submission workflow for ALL submissions** (quantitative + qualitative):
+   1. `section_manager` submits → status `submitted`.
+   2. `planning_section` approves → status `approved` → **counts in statistics immediately**.
+   3. `statistics_admin` reviews — one of three actions (one-shot, locked after):
+      - **Approve** (no reason) — just confirms.
+      - **Edit** (mandatory reason) — modify answer values, audit log records old→new for each field.
+      - **Return** (mandatory reason) — status moves to `returned_by_admin`, **excluded from statistics** until planning re-approves.
+6. Targets are **optional** — their absence must not break any calculation.
+7. Report aggregation must respect `accumulation_type`: `sum`, `average`, or `last_value`. `last_value` queries must be **chronologically ordered** by `(year, week_number)`.
+8. The organization tree allows: Daira→Mudiriya→Qism, Daira→Qism, Mudiriya→Qism (independent).
+9. A `Qism` can never be a parent of another unit.
+10. Authorization scope:
+    - Only `statistics_admin` can create users, open/close weeks, set targets, grant extensions.
+    - Template approval is allowed for both `statistics_admin` (full scope) and `planning_section` (within their `_planning_section_scope_qism_ids` scope).
+    - Admin review (`admin-approve` / `admin-edit` / `admin-return`) is `statistics_admin` only.
+    - Once one `statistics_admin` employee reviews a submission, **no other admin can review the same submission** — `admin_reviewed_at IS NULL` check + `select_for_update()`.
+11. Notifications must be created automatically on every status change event. Form template events must go through `NotificationService` (not raw `Notification.objects.create`) so they propagate over WebSocket.
+12. Indicator `unit_type` and `accumulation_type` are **locked once `SubmissionAnswer` rows exist** for them — changing them would break historical reports.
+13. Target identity fields (`year`, `indicator`, `scope_unit`) are **locked once submissions exist** for the same year+indicator. Only `target_value` and `notes` remain mutable.
+14. **Every state change writes to `AuditLog`** (apps/audit) via `AuditService.log_*`. The log is append-only — never UPDATE or DELETE.
 
 ---
 
