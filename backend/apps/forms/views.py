@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import models
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -19,8 +20,9 @@ from .services import FormTemplateService
 class FormTemplateViewSet(viewsets.ModelViewSet):
     """واجهة برمجية لإدارة قوالب الاستمارات"""
     permission_classes = [FormTemplatePermission]
-    filterset_fields = ['qism', 'status', 'version']
-    search_fields = ['qism__name', 'notes']
+    filterset_fields = ['qism', 'status', 'version', 'qism__parent']
+    search_fields = ['qism__name', 'qism__code', 'notes']
+    ordering_fields = ['created_at', 'version', 'qism__name', 'status']
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -35,28 +37,75 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = FormTemplate.objects.select_related(
-            'qism', 'created_by', 'approved_by', 'rejected_by'
+            'qism', 'qism__parent', 'created_by', 'approved_by', 'rejected_by'
         ).prefetch_related(
             'items__indicator'
         ).order_by('-created_at')
 
-        # تصفية حسب صلاحيات المستخدم
+        # تصفية حسب صلاحيات المستخدم — نستخدم المنطق الموحّد
+        # لدعم المخطط على مستوى المديرية أو الدائرة أو المخطط المركزي
         user = self.request.user
         if user.role == 'statistics_admin':
-            return queryset
+            pass  # نطاق كامل
         elif user.role == 'planning_section':
-            # قسم التخطيط يرى قوالب أقسام مديريته فقط
-            if user.unit and user.unit.parent:
-                return queryset.filter(
-                    qism__parent=user.unit.parent,
-                    qism__unit_type='qism',
-                    qism__qism_role='regular',
-                )
-            return queryset.none()
+            from apps.submissions.services import (
+                _planning_section_scope_qism_ids,
+            )
+            scope_ids = _planning_section_scope_qism_ids(user)
+            if scope_ids is None:
+                pass  # مخطط مركزي — كل القوالب
+            elif not scope_ids:
+                return queryset.none()
+            else:
+                queryset = queryset.filter(qism_id__in=scope_ids)
         elif user.role == 'section_manager':
-            # مدير القسم يرى قوالب قسمه فقط
-            return queryset.filter(qism=user.unit)
-        return queryset.none()
+            queryset = queryset.filter(qism=user.unit)
+        else:
+            return queryset.none()
+
+        # ─── فلاتر هرمية إضافية ───
+        # فلتر بالمديرية (parent مباشر للقسم)
+        mudiriya_id = self.request.query_params.get('mudiriya_id')
+        if mudiriya_id:
+            try:
+                queryset = queryset.filter(qism__parent_id=int(mudiriya_id))
+            except (ValueError, TypeError):
+                pass
+
+        # فلتر بالدائرة (يشمل أقسام الدائرة المباشرة وأقسام مديرياتها)
+        daira_id = self.request.query_params.get('daira_id')
+        if daira_id:
+            try:
+                from apps.organization.models import OrganizationUnit
+                daira = OrganizationUnit.objects.filter(
+                    pk=int(daira_id), unit_type='daira'
+                ).first()
+                if daira:
+                    descendant_ids = list(
+                        daira.get_descendants(include_self=False)
+                        .filter(unit_type='qism')
+                        .values_list('id', flat=True)
+                    )
+                    queryset = queryset.filter(qism_id__in=descendant_ids)
+                else:
+                    queryset = queryset.none()
+            except (ValueError, TypeError):
+                pass
+
+        # فلتر "الإصدار الأخير فقط" لكل قسم
+        latest_only = self.request.query_params.get('latest_only')
+        if latest_only and latest_only.lower() in ('true', '1'):
+            from django.db.models import Max, OuterRef, Subquery
+            latest_versions = (
+                FormTemplate.objects.filter(qism=OuterRef('qism'))
+                .order_by('-version')
+                .values('version')[:1]
+            )
+            queryset = queryset.annotate(
+                _max_version=Subquery(latest_versions)
+            ).filter(version=models.F('_max_version'))
+
+        return queryset
 
     def create(self, request, *args, **kwargs):
         """إنشاء قالب استمارة جديد"""
@@ -100,6 +149,7 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
                 template=template,
                 data=data,
                 items_data=items_data,
+                actor=request.user,
             )
         except DjangoValidationError as e:
             raise DRFValidationError(
@@ -117,10 +167,10 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
     def submit(self, request, pk=None):
         """
         تقديم القالب للاعتماد: مسودة → بانتظار الاعتماد
-        مسموح لقسم التخطيط فقط
+        مسموح لقسم التخطيط ومدير قسم الإحصاء
         """
         # التحقق من الصلاحيات
-        if request.user.role != 'planning_section':
+        if request.user.role not in ('planning_section', 'statistics_admin'):
             return Response(
                 {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -129,7 +179,9 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         template = self.get_object()
 
         try:
-            template = FormTemplateService.submit_for_approval(template)
+            template = FormTemplateService.submit_for_approval(
+                template, actor=request.user
+            )
         except DjangoValidationError as e:
             raise DRFValidationError(
                 e.message_dict if hasattr(e, 'message_dict') else {'detail': e.messages}
@@ -153,19 +205,16 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
 
         template = self.get_object()
 
-        # التحقق من نطاق الصلاحية لقسم التخطيط
-        if request.user.role == 'planning_section' and request.user.unit:
-            parent = request.user.unit.parent
-            if parent:
-                allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
-                if template.qism_id not in allowed_ids:
-                    return Response(
-                        {'detail': 'لا تملك صلاحية اعتماد هذه الاستمارة'},
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-            else:
+        # التحقق من نطاق الصلاحية لقسم التخطيط (يدعم مخطط مديرية/دائرة/مركزي)
+        if request.user.role == 'planning_section':
+            from apps.submissions.services import (
+                _planning_section_scope_qism_ids,
+            )
+            scope_ids = _planning_section_scope_qism_ids(request.user)
+            # scope_ids = None يعني مخطط مركزي (نطاق كامل)
+            if scope_ids is not None and template.qism_id not in scope_ids:
                 return Response(
-                    {'detail': 'لا يمكن تحديد نطاق صلاحياتك'},
+                    {'detail': 'لا تملك صلاحية اعتماد هذه الاستمارة'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -202,19 +251,15 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
 
         template = self.get_object()
 
-        # التحقق من نطاق الصلاحية لقسم التخطيط
-        if request.user.role == 'planning_section' and request.user.unit:
-            parent = request.user.unit.parent
-            if parent:
-                allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
-                if template.qism_id not in allowed_ids:
-                    return Response(
-                        {'detail': 'لا تملك صلاحية رفض هذه الاستمارة'},
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-            else:
+        # التحقق من نطاق الصلاحية لقسم التخطيط (يدعم مخطط مديرية/دائرة/مركزي)
+        if request.user.role == 'planning_section':
+            from apps.submissions.services import (
+                _planning_section_scope_qism_ids,
+            )
+            scope_ids = _planning_section_scope_qism_ids(request.user)
+            if scope_ids is not None and template.qism_id not in scope_ids:
                 return Response(
-                    {'detail': 'لا يمكن تحديد نطاق صلاحياتك'},
+                    {'detail': 'لا تملك صلاحية رفض هذه الاستمارة'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -234,6 +279,46 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
 
         output_serializer = FormTemplateSerializer(template)
         return Response(output_serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='new-version')
+    def new_version(self, request, pk=None):
+        """
+        إنشاء إصدار جديد (مسودة) بناءً على قالب موجود.
+        - يُستخدم لتعديل قالب معتمد دون كسر الربط التاريخي.
+        - مسموح لقسم التخطيط ومدير قسم الإحصاء.
+        """
+        if request.user.role not in ('planning_section', 'statistics_admin'):
+            return Response(
+                {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        source_template = self.get_object()
+
+        try:
+            new_template = FormTemplateService.create_new_version(
+                source_template=source_template,
+                created_by=request.user,
+            )
+        except DjangoValidationError as e:
+            raise DRFValidationError(
+                e.message_dict if hasattr(e, 'message_dict') else {'detail': e.messages}
+            )
+
+        output_serializer = FormTemplateSerializer(new_template)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='pending-count')
+    def pending_count(self, request):
+        """
+        GET /api/forms/templates/pending-count/
+        يُرجع عدد القوالب بانتظار الاعتماد ضمن نطاق المستخدم الحالي.
+        يُستخدم لعرض badge في الـ sidebar.
+        """
+        queryset = self.get_queryset().filter(
+            status=FormTemplate.Status.PENDING_APPROVAL
+        )
+        return Response({'count': queryset.count()})
 
     @action(detail=False, methods=['get'], url_path='active')
     def active(self, request):

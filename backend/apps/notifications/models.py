@@ -15,6 +15,7 @@ class Notification(models.Model):
         FORM_REJECTED = 'form_rejected', 'رفض الاستمارة'
         SUBMISSION_RECEIVED = 'submission_received', 'استلام منجز'
         SUBMISSION_APPROVED = 'submission_approved', 'اعتماد المنجز'
+        SUBMISSION_RETURNED = 'submission_returned', 'إرجاع المنجز للتصحيح'
         QUALITATIVE_PENDING = 'qualitative_pending', 'منجز نوعي بانتظار الاعتماد'
         QUALITATIVE_APPROVED = 'qualitative_approved', 'اعتماد المنجز النوعي'
         QUALITATIVE_REJECTED = 'qualitative_rejected', 'رفض المنجز النوعي'

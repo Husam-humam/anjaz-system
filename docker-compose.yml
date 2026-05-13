@@ -5,6 +5,8 @@ services:
       POSTGRES_DB: ${DB_NAME:-anjaz_db}
       POSTGRES_USER: ${DB_USER:-anjaz_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-your-db-password}
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +17,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

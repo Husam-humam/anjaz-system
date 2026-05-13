@@ -4,6 +4,83 @@ from django.db import models
 from django.utils import timezone
 
 
+class SystemConfiguration(models.Model):
+    """
+    إعدادات النظام العامة — نموذج أحاد (Singleton).
+    يحتوي على تفضيلات الإدارة التلقائية للأسابيع وقواعد الموعد النهائي.
+    """
+
+    class WeekDay(models.IntegerChoices):
+        MONDAY = 0, 'الاثنين'
+        TUESDAY = 1, 'الثلاثاء'
+        WEDNESDAY = 2, 'الأربعاء'
+        THURSDAY = 3, 'الخميس'
+        FRIDAY = 4, 'الجمعة'
+        SATURDAY = 5, 'السبت'
+        SUNDAY = 6, 'الأحد'
+
+    week_start_day = models.IntegerField(
+        choices=WeekDay.choices,
+        default=WeekDay.SATURDAY,
+        verbose_name='يوم بداية الأسبوع',
+        help_text='اليوم الذي يبدأ به الأسبوع رسمياً (يوم السبت هو الافتراضي)',
+    )
+    deadline_days_after_week_end = models.PositiveIntegerField(
+        default=3,
+        verbose_name='أيام الموعد النهائي بعد نهاية الأسبوع',
+        help_text='عدد الأيام بعد نهاية الأسبوع حتى الموعد النهائي للتسليم',
+    )
+    deadline_hour = models.PositiveIntegerField(
+        default=12,
+        verbose_name='ساعة الموعد النهائي',
+        help_text='الساعة من اليوم (0-23) للموعد النهائي. الافتراضي 12 ظهراً',
+    )
+    auto_create_enabled = models.BooleanField(
+        default=True,
+        verbose_name='تفعيل الإنشاء التلقائي للأسابيع',
+        help_text='عند التفعيل، يُنشئ النظام الأسبوع الحالي تلقائياً في بدايته',
+    )
+    auto_close_previous = models.BooleanField(
+        default=True,
+        verbose_name='إغلاق الأسبوع السابق تلقائياً بعد انتهاء موعده',
+        help_text='يُغلق الأسبوع السابق تلقائياً بعد مرور الموعد النهائي',
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='آخر تحديث')
+
+    class Meta:
+        db_table = 'system_configuration'
+        verbose_name = 'إعدادات النظام'
+        verbose_name_plural = 'إعدادات النظام'
+
+    def __str__(self):
+        return 'إعدادات النظام'
+
+    def clean(self):
+        super().clean()
+        if not 0 <= self.deadline_hour <= 23:
+            raise ValidationError({
+                'deadline_hour': 'الساعة يجب أن تكون بين 0 و 23'
+            })
+
+    def save(self, *args, **kwargs):
+        """ضمان وجود سجل واحد فقط (Singleton pattern)"""
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """منع حذف السجل الأحادي"""
+        pass
+
+    @classmethod
+    def load(cls):
+        """
+        إرجاع سجل الإعدادات (ينشئه بالقيم الافتراضية إن لم يكن موجوداً).
+        هذا هو المدخل الموصى به للوصول إلى الإعدادات.
+        """
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+
 class WeeklyPeriod(models.Model):
     """الفترة الأسبوعية"""
 
@@ -64,8 +141,13 @@ class WeeklySubmission(models.Model):
         DRAFT = 'draft', 'مسودة'
         SUBMITTED = 'submitted', 'مُرسل'
         APPROVED = 'approved', 'معتمد'
+        RETURNED = 'returned', 'مُرجَع للتصحيح'
         LATE = 'late', 'متأخر'
         EXTENDED = 'extended', 'مُمدَّد'
+        # مُرجَع من الإحصاء إلى قسم التخطيط لتصحيحه.
+        # هذه الحالة قابلة للتعديل وإعادة الإرسال حتى بعد انتهاء موعد
+        # الأسبوع — لأن التأخير سببه إجراء الإحصاء وليس تقصير القسم.
+        RETURNED_BY_ADMIN = 'returned_by_admin', 'مُرجَع من الإحصاء'
 
     qism = models.ForeignKey(
         'organization.OrganizationUnit', on_delete=models.CASCADE,
@@ -80,7 +162,7 @@ class WeeklySubmission(models.Model):
         related_name='submissions', verbose_name='قالب الاستمارة'
     )
     status = models.CharField(
-        max_length=15, choices=Status.choices,
+        max_length=20, choices=Status.choices,
         default=Status.DRAFT, verbose_name='الحالة'
     )
     submitted_at = models.DateTimeField(
@@ -93,6 +175,23 @@ class WeeklySubmission(models.Model):
     )
     planning_approved_at = models.DateTimeField(
         null=True, blank=True, verbose_name='تاريخ الاعتماد'
+    )
+    # ─── مراجعة الإحصاء (admin review) ───
+    # `admin_reviewed_at IS NULL` يعني «بانتظار مراجعة الإحصاء».
+    # بمجرّد أن يُراجع أحد موظّفي الإحصاء (approve/edit/return)، يُقفَل
+    # المنجز من أي مراجعة أخرى من قبل موظّفي الإحصاء الآخرين.
+    admin_reviewed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='تاريخ مراجعة الإحصاء',
+    )
+    admin_reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='admin_reviewed_submissions',
+        verbose_name='مراجَع بواسطة (الإحصاء)',
+    )
+    admin_review_action = models.CharField(
+        max_length=20, blank=True, default='',
+        verbose_name='إجراء مراجعة الإحصاء',
+        help_text='approved / edited / returned',
     )
     notes = models.TextField(blank=True, default='', verbose_name='ملاحظات')
 
@@ -111,22 +210,40 @@ class WeeklySubmission(models.Model):
         return f'{self.qism.name} - {self.weekly_period}'
 
     def is_editable(self, extensions=None):
-        """التحقق من قابلية التعديل"""
-        if self.status not in ('draft', 'returned', 'extended'):
+        """
+        التحقق من قابلية التعديل.
+
+        ملاحظة خاصة بحالة `RETURNED_BY_ADMIN`:
+        - المنجز المُرجَع من قِبَل الإحصاء **قابل للتعديل دائماً**
+          بغضّ النظر عن حالة الأسبوع أو الموعد النهائي.
+        - السبب: التأخير سببه قرار الإحصاء بإرجاعه، وليس تقصير القسم،
+          ومن غير العادل إقفاله أمام القسم فقط لأن الأسبوع انتهى.
+        - هذا استثناء مقصود من قاعدة «المنجز قابل للتعديل فقط داخل الأسبوع».
+        """
+        # استثناء: المُرجَع من الإحصاء قابل للتعديل دائماً
+        if self.status == self.Status.RETURNED_BY_ADMIN:
+            return True
+
+        editable_statuses = (
+            self.Status.DRAFT,
+            self.Status.RETURNED,
+            self.Status.EXTENDED,
+        )
+        if self.status not in editable_statuses:
             return False
         period = self.weekly_period
-        if period.status != 'open':
+        if period.status != WeeklyPeriod.Status.OPEN:
             return False
         now = timezone.now()
-        if now <= period.deadline:
+        if now < period.deadline:
             return True
-        # Check extensions
+        # تجاوز الموعد النهائي → التحقق من وجود تمديد ساري
         if extensions is not None:
-            return any(ext.new_deadline >= now for ext in extensions)
+            return any(ext.new_deadline > now for ext in extensions)
         return QismExtension.objects.filter(
             qism=self.qism,
             weekly_period=period,
-            new_deadline__gte=now,
+            new_deadline__gt=now,
         ).exists()
 
 

@@ -17,7 +17,11 @@ from apps.accounts.tests.factories import (
 )
 from apps.forms.tests.factories import FormTemplateFactory, FormTemplateItemFactory
 from apps.indicators.tests.factories import IndicatorFactory
-from apps.organization.tests.factories import QismFactory
+from apps.organization.tests.factories import (
+    MudiriyaFactory,
+    PlanningQismFactory,
+    QismFactory,
+)
 
 from ..services import (
     AggregationService,
@@ -95,6 +99,34 @@ class TestSubmissionServiceSubmit:
         assert "لا يمكن إرسال هذا المنجز" in str(exc.value)
 
     @freeze_time("2025-04-14 10:00:00")
+    @patch("apps.submissions.services._notify_submission_received")
+    def test_submit_from_returned_status(self, mock_notify):
+        """يمكن إعادة إرسال منجز سبق رفضه (حالة 'مُرجَع')"""
+        qism = QismFactory()
+        indicator = IndicatorFactory(unit_type="number", accumulation_type="sum")
+        template = FormTemplateFactory(qism=qism, status="approved")
+        item = FormTemplateItemFactory(
+            form_template=template, indicator=indicator, is_mandatory=True
+        )
+        period = WeeklyPeriodFactory(
+            status="open",
+            deadline=timezone.make_aware(datetime(2025, 4, 15, 23, 59, 0)),
+        )
+        submission = WeeklySubmissionFactory(
+            qism=qism,
+            weekly_period=period,
+            form_template=template,
+            status="returned",
+        )
+        SubmissionAnswerFactory(
+            submission=submission, form_item=item, numeric_value=10,
+        )
+        user = SectionManagerFactory(unit=qism)
+        result = SubmissionService.submit(submission, user)
+        assert result.status == "submitted"
+        mock_notify.assert_called_once()
+
+    @freeze_time("2025-04-14 10:00:00")
     def test_submit_fails_from_approved_status(self):
         """لا يمكن إرسال منجز في حالة 'معتمد'"""
         qism = QismFactory()
@@ -124,8 +156,12 @@ class TestSubmissionServiceApprove:
     @patch("apps.submissions.services._notify_qualitative_pending")
     def test_approve_transitions_to_approved(self, mock_qual, mock_notify):
         """اعتماد المنجز ينقل الحالة من مُرسل إلى معتمد"""
-        submission = WeeklySubmissionFactory(status="submitted")
-        planner = PlanningSectionUserFactory()
+        # القسم والمخطط يتبعان نفس المديرية
+        mudiriya = MudiriyaFactory()
+        qism = QismFactory(parent=mudiriya)
+        planning_qism = PlanningQismFactory(parent=mudiriya)
+        submission = WeeklySubmissionFactory(qism=qism, status="submitted")
+        planner = PlanningSectionUserFactory(unit=planning_qism)
 
         result = SubmissionService.approve(submission, planner)
 
@@ -140,7 +176,9 @@ class TestSubmissionServiceApprove:
         self, mock_qual, mock_notify
     ):
         """اعتماد المنجز ينقل المنجزات النوعية إلى بانتظار اعتماد الإحصاء"""
-        qism = QismFactory()
+        mudiriya = MudiriyaFactory()
+        qism = QismFactory(parent=mudiriya)
+        planning_qism = PlanningQismFactory(parent=mudiriya)
         indicator = IndicatorFactory(unit_type="number", accumulation_type="sum")
         template = FormTemplateFactory(qism=qism, status="approved")
         item = FormTemplateItemFactory(
@@ -162,7 +200,7 @@ class TestSubmissionServiceApprove:
             qualitative_status="pending_planning",
         )
 
-        planner = PlanningSectionUserFactory()
+        planner = PlanningSectionUserFactory(unit=planning_qism)
         SubmissionService.approve(submission, planner)
 
         answer.refresh_from_db()
@@ -171,12 +209,96 @@ class TestSubmissionServiceApprove:
 
     def test_approve_fails_if_not_submitted(self):
         """لا يمكن اعتماد منجز ليس في حالة 'مُرسل'"""
-        submission = WeeklySubmissionFactory(status="draft")
-        planner = PlanningSectionUserFactory()
+        mudiriya = MudiriyaFactory()
+        qism = QismFactory(parent=mudiriya)
+        planning_qism = PlanningQismFactory(parent=mudiriya)
+        submission = WeeklySubmissionFactory(qism=qism, status="draft")
+        planner = PlanningSectionUserFactory(unit=planning_qism)
 
         with pytest.raises(ValidationError) as exc:
             SubmissionService.approve(submission, planner)
         assert 'يجب أن يكون بحالة "مُرسل"' in str(exc.value)
+
+    def test_approve_fails_if_planner_out_of_scope(self):
+        """قسم التخطيط لا يستطيع اعتماد منجز خارج نطاق مديريته"""
+        from django.core.exceptions import PermissionDenied
+        # المخطط في مديرية مختلفة عن قسم المنجز
+        submission = WeeklySubmissionFactory(status="submitted")
+        planner = PlanningSectionUserFactory()  # مديرية مختلفة افتراضياً
+
+        with pytest.raises(PermissionDenied):
+            SubmissionService.approve(submission, planner)
+
+    @patch("apps.submissions.services._notify_submission_returned")
+    def test_reject_by_planning_returns_submission(self, mock_notify):
+        """رفض المنجز من قسم التخطيط يعيده إلى حالة مُرجَع للتصحيح"""
+        mudiriya = MudiriyaFactory()
+        qism = QismFactory(parent=mudiriya)
+        planning_qism = PlanningQismFactory(parent=mudiriya)
+        submission = WeeklySubmissionFactory(qism=qism, status="submitted")
+        planner = PlanningSectionUserFactory(unit=planning_qism)
+
+        result = SubmissionService.reject_by_planning(
+            submission, planner, reason="بيانات غير كاملة"
+        )
+
+        assert result.status == "returned"
+        assert "بيانات غير كاملة" in result.notes
+        assert result.is_editable() is True
+        mock_notify.assert_called_once()
+
+    def test_reject_by_planning_requires_reason(self):
+        """رفض المنجز يتطلب سبباً غير فارغ"""
+        mudiriya = MudiriyaFactory()
+        qism = QismFactory(parent=mudiriya)
+        planning_qism = PlanningQismFactory(parent=mudiriya)
+        submission = WeeklySubmissionFactory(qism=qism, status="submitted")
+        planner = PlanningSectionUserFactory(unit=planning_qism)
+
+        with pytest.raises(ValidationError) as exc:
+            SubmissionService.reject_by_planning(submission, planner, reason="")
+        assert "سبب الإرجاع" in str(exc.value) or "سبب الرفض" in str(exc.value)
+
+
+@pytest.mark.django_db
+class TestWeeklyPeriodServiceClose:
+    """اختبارات خدمة إغلاق الفترة الأسبوعية"""
+
+    @freeze_time("2025-04-20 10:00:00")
+    def test_close_blocks_when_active_extensions_exist(self):
+        """إغلاق الفترة يُرفض إذا كانت هناك تمديدات لم تنته"""
+        from apps.submissions.services import WeeklyPeriodService
+        admin = StatisticsAdminFactory()
+        period = WeeklyPeriodFactory(
+            status="open",
+            deadline=timezone.make_aware(datetime(2025, 4, 14, 23, 59, 0)),
+        )
+        QismExtensionFactory(
+            weekly_period=period,
+            new_deadline=timezone.make_aware(datetime(2025, 4, 25, 23, 59, 0)),
+        )
+        with pytest.raises(ValidationError) as exc:
+            WeeklyPeriodService.close_period(period, admin)
+        assert "تمديدات سارية" in str(exc.value)
+        period.refresh_from_db()
+        assert period.status == "open"  # لم يتم الإغلاق
+
+    @freeze_time("2025-04-30 10:00:00")
+    def test_close_succeeds_when_extensions_expired(self):
+        """إغلاق الفترة ينجح إذا انتهت جميع التمديدات"""
+        from apps.submissions.services import WeeklyPeriodService
+        admin = StatisticsAdminFactory()
+        period = WeeklyPeriodFactory(
+            status="open",
+            deadline=timezone.make_aware(datetime(2025, 4, 14, 23, 59, 0)),
+        )
+        QismExtensionFactory(
+            weekly_period=period,
+            new_deadline=timezone.make_aware(datetime(2025, 4, 20, 23, 59, 0)),
+        )
+        WeeklyPeriodService.close_period(period, admin)
+        period.refresh_from_db()
+        assert period.status == "closed"
 
 
 @pytest.mark.django_db

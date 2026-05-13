@@ -90,7 +90,37 @@ class TestReportPeriodicAPI:
 
         assert response.status_code == 200
         assert "results" in response.data
-        assert "period_type" in response.data
+        assert "indicator_summary" in response.data
+        assert "meta" in response.data
+        assert response.data["meta"].get("period_type") == "weekly"
+
+    def test_periodic_endpoint_date_range(self, api_client):
+        """تقرير دوري بنطاق تاريخي بدلاً من period_type"""
+        admin = StatisticsAdminFactory()
+
+        api_client.force_authenticate(admin)
+        response = api_client.get(
+            "/api/reports/periodic/",
+            {"from_date": "2026-01-01", "to_date": "2026-03-31"},
+        )
+
+        assert response.status_code == 200
+        assert "results" in response.data
+        assert "indicator_summary" in response.data
+        assert response.data["meta"]["from_date"] == "2026-01-01"
+        assert response.data["meta"]["to_date"] == "2026-03-31"
+
+    def test_periodic_endpoint_invalid_date_range(self, api_client):
+        """تنسيق تاريخ غير صالح يُرجع 400"""
+        admin = StatisticsAdminFactory()
+
+        api_client.force_authenticate(admin)
+        response = api_client.get(
+            "/api/reports/periodic/",
+            {"from_date": "invalid", "to_date": "2026-03-31"},
+        )
+
+        assert response.status_code == 400
 
 
 @pytest.mark.django_db

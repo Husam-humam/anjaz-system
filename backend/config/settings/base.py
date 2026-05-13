@@ -54,6 +54,7 @@ LOCAL_APPS = [
     'apps.submissions',
     'apps.reports',
     'apps.notifications',
+    'apps.audit',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -68,6 +69,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # فحص يومي خفيف لإنشاء الأسبوع الحالي تلقائياً
+    'apps.submissions.middleware.PeriodAutoCheckMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -141,7 +144,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 20,
     'EXCEPTION_HANDLER': 'apps.accounts.exceptions.custom_exception_handler',
     'NON_FIELD_ERRORS_KEY': 'detail',

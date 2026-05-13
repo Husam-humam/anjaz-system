@@ -60,13 +60,29 @@ class TestFormTemplateSubmitAPI:
         assert response.status_code == 200
         assert response.data['status'] == FormTemplate.Status.PENDING_APPROVAL
 
-    def test_submit_by_non_planner_fails(self, api_client):
-        """اختبار أن غير قسم التخطيط لا يمكنه تقديم القالب"""
+    def test_submit_by_admin_is_allowed(self, api_client):
+        """
+        مدير الإحصاء يستطيع تقديم قالب للاعتماد.
+        (الإنشاء والتقديم مسموحان لقسم التخطيط ومدير الإحصاء معاً).
+        """
         admin = StatisticsAdminFactory()
         template = FormTemplateFactory(status='draft')
         FormTemplateItemFactory(form_template=template)
 
         api_client.force_authenticate(user=admin)
+        url = reverse('form-template-submit', kwargs={'pk': template.pk})
+        response = api_client.post(url)
+
+        assert response.status_code == 200
+        assert response.data['status'] == FormTemplate.Status.PENDING_APPROVAL
+
+    def test_submit_by_section_manager_fails(self, api_client):
+        """مدير القسم لا يستطيع تقديم قالب"""
+        manager = SectionManagerFactory()
+        template = FormTemplateFactory(status='draft')
+        FormTemplateItemFactory(form_template=template)
+
+        api_client.force_authenticate(user=manager)
         url = reverse('form-template-submit', kwargs={'pk': template.pk})
         response = api_client.post(url)
 
@@ -85,9 +101,10 @@ class TestFormTemplateApproveAPI:
 
         api_client.force_authenticate(user=admin)
         url = reverse('form-template-approve', kwargs={'pk': template.pk})
+        # تاريخ تفعيل مستقبلي — لا يُسمح بالاعتماد بأثر رجعي
         data = {
             'effective_from_week': 5,
-            'effective_from_year': 2025,
+            'effective_from_year': 2099,
         }
         response = api_client.post(url, data=data, format='json')
 
@@ -104,7 +121,7 @@ class TestFormTemplateApproveAPI:
         url = reverse('form-template-approve', kwargs={'pk': template.pk})
         data = {
             'effective_from_week': 5,
-            'effective_from_year': 2025,
+            'effective_from_year': 2099,
         }
         response = api_client.post(url, data=data, format='json')
 

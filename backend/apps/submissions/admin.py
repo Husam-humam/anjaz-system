@@ -1,5 +1,63 @@
 from django.contrib import admin
-from .models import WeeklyPeriod, WeeklySubmission, SubmissionAnswer, QismExtension
+from django.urls import reverse
+from django.shortcuts import redirect
+from .models import (
+    QismExtension,
+    SubmissionAnswer,
+    SystemConfiguration,
+    WeeklyPeriod,
+    WeeklySubmission,
+)
+
+
+@admin.register(SystemConfiguration)
+class SystemConfigurationAdmin(admin.ModelAdmin):
+    """
+    إدارة إعدادات النظام — Singleton.
+    يُعرض تلقائياً كنموذج واحد فقط ولا يمكن إضافة/حذف سجلات.
+    """
+    fieldsets = (
+        ('الإدارة التلقائية للأسابيع', {
+            'fields': (
+                'auto_create_enabled',
+                'auto_close_previous',
+                'week_start_day',
+            ),
+            'description': (
+                'تحدّد هذه الإعدادات كيف يُدير النظام الأسابيع تلقائياً. '
+                'عند التفعيل، يُنشئ النظام الأسبوع الحالي عند بدايته ويُغلق السابق بعد الموعد النهائي.'
+            ),
+        }),
+        ('إعدادات الموعد النهائي', {
+            'fields': (
+                'deadline_days_after_week_end',
+                'deadline_hour',
+            ),
+            'description': (
+                'الموعد النهائي = تاريخ نهاية الأسبوع + عدد الأيام + الساعة المحدّدة. '
+                'مثال: نهاية الأسبوع الجمعة + 3 أيام + الساعة 12 = الاثنين 12 ظهراً.'
+            ),
+        }),
+        ('معلومات النظام', {
+            'fields': ('updated_at',),
+            'classes': ('collapse',),
+        }),
+    )
+    readonly_fields = ('updated_at',)
+
+    def has_add_permission(self, request):
+        # السماح فقط إذا لم يكن هناك سجل بعد
+        return not SystemConfiguration.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        """إعادة التوجيه مباشرة إلى صفحة التحرير للسجل الأحادي"""
+        obj = SystemConfiguration.load()
+        return redirect(
+            reverse('admin:submissions_systemconfiguration_change', args=[obj.pk])
+        )
 
 
 @admin.register(WeeklyPeriod)

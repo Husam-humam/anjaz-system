@@ -18,14 +18,11 @@ class CanViewSubmission(permissions.BasePermission):
         if user.role == 'statistics_admin':
             return True
         if user.role == 'planning_section':
-            # قسم التخطيط يرى منجزات أقسام المديرية التابعة
-            if user.unit and user.unit.parent:
-                directorate = user.unit.parent
-                descendant_ids = directorate.get_descendants(
-                    include_self=False
-                ).values_list('id', flat=True)
-                return obj.qism_id in descendant_ids
-            return False
+            from .services import _planning_section_scope_qism_ids
+            scope_ids = _planning_section_scope_qism_ids(user)
+            if scope_ids is None:  # نطاق مركزي
+                return True
+            return obj.qism_id in scope_ids
         if user.role == 'section_manager':
             return obj.qism_id == user.unit_id
         return False

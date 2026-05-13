@@ -27,6 +27,9 @@ class WeeklyPeriodSerializer(serializers.ModelSerializer):
             'deadline', 'status', 'created_by', 'created_at',
         ]
         read_only_fields = ['status', 'created_by', 'created_at']
+        # نُلغي UniqueTogetherValidator التلقائي لأن WeeklyPeriodService
+        # يتحقّق من التكرار ويُرجع رسالة عربية مخصّصة.
+        validators = []
         extra_kwargs = {
             'year': {
                 'error_messages': {
@@ -158,23 +161,42 @@ class SubmissionAnswerSerializer(serializers.ModelSerializer):
 class WeeklySubmissionSerializer(serializers.ModelSerializer):
     """مسلسل المنجز الأسبوعي — للقراءة"""
     qism_name = serializers.CharField(source='qism.name', read_only=True)
+    qism_parent_name = serializers.CharField(
+        source='qism.parent.name', read_only=True, default=None
+    )
     period_display = serializers.CharField(
         source='weekly_period.__str__', read_only=True
     )
+    period_week_number = serializers.IntegerField(
+        source='weekly_period.week_number', read_only=True
+    )
+    period_year = serializers.IntegerField(
+        source='weekly_period.year', read_only=True
+    )
     answers = SubmissionAnswerSerializer(many=True, read_only=True)
     is_editable = serializers.SerializerMethodField()
+    planning_approved_by_name = serializers.CharField(
+        source='planning_approved_by.full_name', read_only=True, default=None
+    )
+    admin_reviewed_by_name = serializers.CharField(
+        source='admin_reviewed_by.full_name', read_only=True, default=None
+    )
 
     class Meta:
         model = WeeklySubmission
         fields = [
-            'id', 'qism', 'qism_name', 'weekly_period', 'period_display',
+            'id', 'qism', 'qism_name', 'qism_parent_name',
+            'weekly_period', 'period_display', 'period_week_number', 'period_year',
             'form_template', 'status', 'submitted_at',
-            'planning_approved_by', 'planning_approved_at',
+            'planning_approved_by', 'planning_approved_by_name', 'planning_approved_at',
+            'admin_reviewed_at', 'admin_reviewed_by', 'admin_reviewed_by_name',
+            'admin_review_action',
             'notes', 'answers', 'is_editable',
         ]
         read_only_fields = [
             'qism', 'form_template', 'status', 'submitted_at',
             'planning_approved_by', 'planning_approved_at',
+            'admin_reviewed_at', 'admin_reviewed_by', 'admin_review_action',
         ]
 
     def get_is_editable(self, obj):
@@ -269,5 +291,16 @@ class QualitativeRejectSerializer(serializers.Serializer):
         error_messages={
             'required': 'سبب الرفض مطلوب.',
             'blank': 'سبب الرفض لا يمكن أن يكون فارغاً.',
+        }
+    )
+
+
+class SubmissionRejectSerializer(serializers.Serializer):
+    """مسلسل رفض المنجز الأسبوعي من قسم التخطيط"""
+    reason = serializers.CharField(
+        required=True,
+        error_messages={
+            'required': 'سبب الإرجاع مطلوب.',
+            'blank': 'سبب الإرجاع لا يمكن أن يكون فارغاً.',
         }
     )

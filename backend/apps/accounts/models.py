@@ -82,7 +82,14 @@ class User(AbstractUser):
         """
         super().clean()
 
+        # مدير القسم يجب أن يكون مرتبطاً بقسم — بدون وحدة لا يوجد نطاق عمل.
+        # قسم التخطيط يُسمح له بعدم الارتباط بوحدة (يُعدّ مخطِّطاً مركزياً).
+        # مدير قسم الإحصاء يملك نطاقاً كاملاً ولا يُشترط ربطه بوحدة.
         if not self.unit_id:
+            if self.role == UserRole.SECTION_MANAGER:
+                raise ValidationError({
+                    'unit': 'مدير القسم يجب أن يكون مرتبطاً بقسم.',
+                })
             return
 
         unit = self.unit

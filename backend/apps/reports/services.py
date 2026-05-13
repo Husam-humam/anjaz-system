@@ -88,62 +88,168 @@ class ReportService:
         }
 
     @staticmethod
-    def get_periodic_report(period_type, year, period_number, unit_id=None):
-        """تقرير دوري مجمّع"""
-        weeks = ReportService._get_weeks_for_period(period_type, year, period_number)
-        if not weeks:
-            return {'results': [], 'period_type': period_type, 'year': year}
+    def get_periodic_report(
+        period_type=None, year=None, period_number=None,
+        unit_id=None, from_date=None, to_date=None,
+    ):
+        """
+        تقرير دوري مجمّع — يدعم نمطين:
+        1) الكلاسيكي: period_type + year + period_number
+        2) الجديد: from_date + to_date (date range)
+
+        يُرجع:
+        {
+            'results': [...],           # كل (قسم، مؤشر) مع القيمة المُجمّعة
+            'indicator_summary': [...], # ملخّص لكل مؤشر على مستوى النطاق كاملاً
+            'meta': {'weeks_count', 'from_date', 'to_date', ...}
+        }
+        """
+        # تحديد مجموعة الأسابيع
+        if from_date and to_date:
+            weeks = WeeklyPeriod.objects.filter(
+                start_date__lte=to_date,
+                end_date__gte=from_date,
+            )
+        elif period_type and year:
+            weeks = ReportService._get_weeks_for_period(
+                period_type, year, period_number
+            )
+        else:
+            return {
+                'results': [],
+                'indicator_summary': [],
+                'meta': {'weeks_count': 0},
+            }
+
+        if not weeks.exists():
+            return {
+                'results': [],
+                'indicator_summary': [],
+                'meta': {
+                    'weeks_count': 0,
+                    'period_type': period_type,
+                    'year': year,
+                    'period_number': period_number,
+                    'from_date': str(from_date) if from_date else None,
+                    'to_date': str(to_date) if to_date else None,
+                },
+            }
 
         week_ids = list(weeks.values_list('id', flat=True))
         submissions = WeeklySubmission.objects.filter(
             weekly_period_id__in=week_ids,
-            status='approved',
+            status__in=['submitted', 'approved'],
         ).select_related('qism', 'form_template')
 
+        # تصفية حسب الوحدة (تُشمل أقسام الأحفاد)
         if unit_id:
             unit = OrganizationUnit.objects.get(pk=unit_id)
-            descendant_ids = list(unit.get_descendants().values_list('id', flat=True))
+            descendant_ids = list(
+                unit.get_descendants().values_list('id', flat=True)
+            )
             descendant_ids.append(unit.id)
             submissions = submissions.filter(qism_id__in=descendant_ids)
 
+        # الترتيب حسب (سنة، رقم الأسبوع) ضروري لصحة aggregation='last_value'
+        # — حتى يكون آخر عنصر في القائمة هو فعلاً الأحدث زمنياً.
         answers = SubmissionAnswer.objects.filter(
             submission__in=submissions,
         ).select_related(
-            'form_item__indicator', 'submission__qism', 'submission__weekly_period'
+            'form_item__indicator', 'form_item__indicator__category',
+            'submission__qism', 'submission__weekly_period',
+        ).order_by(
+            'submission__weekly_period__year',
+            'submission__weekly_period__week_number',
         )
 
-        # تجميع حسب القسم والمؤشر
-        results = defaultdict(lambda: defaultdict(list))
-        for answer in answers:
-            if answer.numeric_value is not None:
-                key = (answer.submission.qism.name, answer.form_item.indicator.name)
-                results[key[0]][key[1]].append({
-                    'value': answer.numeric_value,
-                    'week': answer.submission.weekly_period.week_number,
-                    'accumulation_type': answer.form_item.indicator.accumulation_type,
-                })
+        # تجميع حسب (qism_id, indicator_id)
+        by_qism_indicator = defaultdict(
+            lambda: {'values': [], 'qism': None, 'indicator': None}
+        )
+        by_indicator = defaultdict(
+            lambda: {'values': [], 'indicator': None, 'qism_ids': set()}
+        )
 
-        # تطبيق التجميع
+        for answer in answers:
+            if answer.numeric_value is None:
+                continue
+            qism = answer.submission.qism
+            indicator = answer.form_item.indicator
+
+            key = (qism.id, indicator.id)
+            by_qism_indicator[key]['values'].append(answer.numeric_value)
+            by_qism_indicator[key]['qism'] = qism
+            by_qism_indicator[key]['indicator'] = indicator
+
+            by_indicator[indicator.id]['values'].append(answer.numeric_value)
+            by_indicator[indicator.id]['indicator'] = indicator
+            by_indicator[indicator.id]['qism_ids'].add(qism.id)
+
+        # النتائج التفصيلية (قسم × مؤشر)
         report_data = []
-        for qism_name, indicators in results.items():
-            for indicator_name, values in indicators.items():
-                acc_type = values[0]['accumulation_type'] if values else 'sum'
-                numeric_values = [v['value'] for v in values]
-                aggregated = ReportService._aggregate_values(numeric_values, acc_type)
-                report_data.append({
-                    'qism_name': qism_name,
-                    'indicator_name': indicator_name,
-                    'aggregated_value': aggregated,
-                    'accumulation_type': acc_type,
-                    'data_points': len(numeric_values),
-                })
+        for (qism_id, indicator_id), bucket in by_qism_indicator.items():
+            qism = bucket['qism']
+            indicator = bucket['indicator']
+            acc_type = indicator.accumulation_type
+            aggregated = ReportService._aggregate_values(
+                bucket['values'], acc_type
+            )
+            # الوحدة الأم المباشرة + الجد للعرض الهرمي
+            parent = qism.parent
+            grandparent = parent.parent if parent else None
+            report_data.append({
+                'qism_id': qism.id,
+                'qism_name': qism.name,
+                'qism_code': qism.code,
+                'parent_id': parent.id if parent else None,
+                'parent_name': parent.name if parent else None,
+                'grandparent_id': grandparent.id if grandparent else None,
+                'grandparent_name': grandparent.name if grandparent else None,
+                'indicator_id': indicator.id,
+                'indicator_name': indicator.name,
+                'indicator_category': (
+                    indicator.category.name if indicator.category_id else None
+                ),
+                'aggregated_value': aggregated,
+                'accumulation_type': acc_type,
+                'data_points': len(bucket['values']),
+            })
+
+        # ملخّص لكل مؤشر على مستوى النطاق كاملاً
+        indicator_summary = []
+        for ind_id, bucket in by_indicator.items():
+            indicator = bucket['indicator']
+            acc_type = indicator.accumulation_type
+            total = ReportService._aggregate_values(
+                bucket['values'], acc_type
+            )
+            indicator_summary.append({
+                'indicator_id': ind_id,
+                'indicator_name': indicator.name,
+                'indicator_category': (
+                    indicator.category.name if indicator.category_id else None
+                ),
+                'total_value': total,
+                'accumulation_type': acc_type,
+                'contributing_qisms': len(bucket['qism_ids']),
+                'data_points': len(bucket['values']),
+            })
+        # ترتيب حسب التصنيف ثم الاسم
+        indicator_summary.sort(
+            key=lambda x: (x['indicator_category'] or '', x['indicator_name'])
+        )
 
         return {
             'results': report_data,
-            'period_type': period_type,
-            'year': year,
-            'period_number': period_number,
-            'weeks_count': len(week_ids),
+            'indicator_summary': indicator_summary,
+            'meta': {
+                'weeks_count': len(week_ids),
+                'period_type': period_type,
+                'year': year,
+                'period_number': period_number,
+                'from_date': str(from_date) if from_date else None,
+                'to_date': str(to_date) if to_date else None,
+            },
         }
 
     @staticmethod
@@ -155,7 +261,10 @@ class ReportService:
         )
         if unit_id:
             unit = OrganizationUnit.objects.get(pk=unit_id)
-            descendant_ids = list(unit.get_descendants().values_list('id', flat=True))
+            # include_self=True حتى إذا كان `unit` نفسه قسماً يُدرَج في التقرير.
+            descendant_ids = list(
+                unit.get_descendants(include_self=True).values_list('id', flat=True)
+            )
             qisms = qisms.filter(id__in=descendant_ids)
 
         compliance_data = []
@@ -207,6 +316,8 @@ class ReportService:
     @staticmethod
     def export_excel(report_data, report_title):
         """تصدير التقرير بصيغة Excel"""
+        from django.utils import timezone as dj_timezone
+
         wb = Workbook()
         ws = wb.active
         ws.title = report_title[:31]
@@ -214,6 +325,9 @@ class ReportService:
 
         # العنوان
         ws.append([report_title])
+        # ختم زمني للتوليد — التقارير «حيّة» وقد تختلف عند مراجعة لاحقة من الإحصاء.
+        generated_at = dj_timezone.localtime().strftime('%Y-%m-%d %H:%M')
+        ws.append([f'تاريخ توليد التقرير: {generated_at}'])
         ws.append([])
 
         # الرؤوس
@@ -237,6 +351,8 @@ class ReportService:
     @staticmethod
     def export_pdf(report_data, report_title):
         """تصدير التقرير بصيغة PDF"""
+        from django.utils import timezone as dj_timezone
+
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer, pagesize=landscape(A4),
@@ -253,6 +369,17 @@ class ReportService:
             alignment=1,  # center
         )
         elements.append(Paragraph(report_title, title_style))
+
+        # ختم زمني للتوليد — يُذكّر القارئ أن التقرير snapshot لحظي،
+        # وأي تعديل لاحق من الإحصاء قد يُغيّر الأرقام في النظام.
+        generated_at = dj_timezone.localtime().strftime('%Y-%m-%d %H:%M')
+        timestamp_style = ParagraphStyle(
+            'ArabicTimestamp', parent=styles['Normal'],
+            alignment=1, fontSize=8, textColor=colors.grey,
+        )
+        elements.append(
+            Paragraph(f'تاريخ توليد التقرير: {generated_at}', timestamp_style)
+        )
         elements.append(Spacer(1, 0.5 * cm))
 
         # الجدول
@@ -330,45 +457,70 @@ class ReportService:
 
     @staticmethod
     def _get_target_progress(user, year):
-        """حساب تقدم المستهدفات"""
-        targets = Target.objects.filter(year=year).select_related('qism', 'indicator')
+        """
+        حساب تقدم المستهدفات الهرمية (مؤسسة/دائرة/مديرية/قسم).
+        يستخدم TargetService.compute_target_progress للحساب الموحّد.
+        يُرجع كل المستهدفات المرئية للمستخدم (دون حد `[:10]`).
+        """
+        from apps.targets.services import TargetService
 
-        if user.role == 'section_manager':
-            targets = targets.filter(qism=user.unit)
-        elif user.role == 'planning_section' and user.unit and user.unit.parent:
-            parent = user.unit.parent
-            descendant_ids = list(parent.get_descendants().values_list('id', flat=True))
-            targets = targets.filter(qism_id__in=descendant_ids)
+        targets = Target.objects.filter(year=year).select_related(
+            'scope_unit', 'scope_unit__parent',
+            'indicator',
+        ).order_by('scope_unit__name', 'indicator__name')
+
+        # تصفية حسب الدور (نفس منطق TargetViewSet.get_queryset للاتساق)
+        if user.role == 'statistics_admin':
+            pass
+        elif user.role == 'planning_section':
+            if user.unit and user.unit.parent:
+                directorate = user.unit.parent
+                descendant_ids = list(
+                    directorate.get_descendants(include_self=True)
+                    .values_list('id', flat=True)
+                )
+                ancestor_ids = list(
+                    directorate.get_ancestors().values_list('id', flat=True)
+                )
+                visible_ids = set(descendant_ids) | set(ancestor_ids)
+                from django.db.models import Q
+                targets = targets.filter(
+                    Q(scope_unit__isnull=True) |
+                    Q(scope_unit_id__in=visible_ids)
+                )
+            else:
+                targets = targets.filter(scope_unit__isnull=True)
+        elif user.role == 'section_manager' and user.unit:
+            from django.db.models import Q
+            ancestors_ids = list(
+                user.unit.get_ancestors(include_self=False)
+                .values_list('id', flat=True)
+            )
+            targets = targets.filter(
+                Q(scope_unit__isnull=True) |
+                Q(scope_unit=user.unit) |
+                Q(scope_unit_id__in=ancestors_ids)
+            )
+        else:
+            targets = targets.none()
 
         progress_list = []
-        for target in targets[:10]:  # أعلى 10
-            cumulative = SubmissionAnswer.objects.filter(
-                submission__qism=target.qism,
-                submission__weekly_period__year=year,
-                submission__status='approved',
-                form_item__indicator=target.indicator,
-                numeric_value__isnull=False,
+        for target in targets:
+            progress = TargetService.compute_target_progress(target)
+            scope_name = (
+                target.scope_unit.name if target.scope_unit_id
+                else 'المؤسسة كاملة'
             )
-            if target.indicator.accumulation_type == 'sum':
-                result = cumulative.aggregate(total=Sum('numeric_value'))
-                cumulative_value = result['total'] or 0
-            elif target.indicator.accumulation_type == 'average':
-                result = cumulative.aggregate(avg=Avg('numeric_value'))
-                cumulative_value = result['avg'] or 0
-            else:
-                last = cumulative.order_by(
-                    '-submission__weekly_period__week_number'
-                ).first()
-                cumulative_value = last.numeric_value if last else 0
-
-            progress_pct = (cumulative_value / target.target_value * 100) if target.target_value > 0 else 0
-
             progress_list.append({
+                'target_id': target.id,
                 'indicator_name': target.indicator.name,
-                'qism_name': target.qism.name,
-                'cumulative_value': round(cumulative_value, 2),
-                'target_value': target.target_value,
-                'progress_percentage': round(progress_pct, 1),
+                # للتوافق مع الفرونت القديم نُبقي على مفتاح qism_name
+                'qism_name': scope_name,
+                'scope_unit_name': scope_name,
+                'scope_level': target.scope_level,
+                'cumulative_value': progress['cumulative_value'],
+                'target_value': progress['target_value'],
+                'progress_percentage': progress['progress_percentage'],
             })
 
         return progress_list

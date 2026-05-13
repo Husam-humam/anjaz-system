@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 
 class FormTemplate(models.Model):
@@ -59,6 +60,16 @@ class FormTemplate(models.Model):
         indexes = [
             models.Index(fields=['qism', 'status'], name='idx_form_qism_status'),
             models.Index(fields=['status'], name='idx_form_status'),
+        ]
+        constraints = [
+            # طبقة دفاع على مستوى قاعدة البيانات: يستحيل وجود قالبَين معتمدَين
+            # لنفس القسم يبدآن في نفس الأسبوع والسنة. يُفرَض مع منطق
+            # approve_template الذي يُستبدِل الأقدم قبل اعتماد الجديد.
+            models.UniqueConstraint(
+                fields=['qism', 'effective_from_year', 'effective_from_week'],
+                condition=Q(status='approved'),
+                name='uniq_approved_effective_per_qism',
+            ),
         ]
 
     def __str__(self):

@@ -23,48 +23,23 @@ class SubmissionQuerySet(models.QuerySet):
         """
         تصفية المنجزات حسب صلاحيات المستخدم:
         - statistics_admin: جميع المنجزات
-        - planning_section: منجزات الأقسام التابعة لنفس المديرية/الدائرة
+        - planning_section: منجزات الأقسام التابعة لنفس المديرية/الدائرة،
+          أو جميع المنجزات إذا كان قسم التخطيط مركزياً (بدون أب)
         - section_manager: منجزات قسمه فقط
         """
         if user.role == 'statistics_admin':
             return self.all()
 
-        elif user.role == 'planning_section':
-            # قسم التخطيط يرى منجزات الأقسام التابعة لنفس الأب (مديرية أو دائرة)
-            parent_unit = user.unit.parent if user.unit else None
-            if parent_unit:
-                from apps.organization.models import OrganizationUnit, UnitType
-                # الأقسام العادية التي تتبع نفس الأب
-                sibling_qism_ids = OrganizationUnit.objects.filter(
-                    parent=parent_unit,
-                    unit_type=UnitType.QISM,
-                    qism_role='regular',
-                    is_active=True,
-                ).values_list('id', flat=True)
+        if user.role == 'planning_section':
+            from .services import _planning_section_scope_qism_ids
+            scope_ids = _planning_section_scope_qism_ids(user)
+            if scope_ids is None:  # نطاق مركزي
+                return self.all()
+            if not scope_ids:
+                return self.none()
+            return self.filter(qism_id__in=scope_ids)
 
-                # أيضاً الأقسام التابعة لمديريات تحت نفس الدائرة
-                if parent_unit.unit_type == UnitType.DAIRA:
-                    mudiriya_ids = OrganizationUnit.objects.filter(
-                        parent=parent_unit,
-                        unit_type=UnitType.MUDIRIYA,
-                        is_active=True,
-                    ).values_list('id', flat=True)
-
-                    nested_qism_ids = OrganizationUnit.objects.filter(
-                        parent_id__in=mudiriya_ids,
-                        unit_type=UnitType.QISM,
-                        qism_role='regular',
-                        is_active=True,
-                    ).values_list('id', flat=True)
-
-                    all_qism_ids = set(sibling_qism_ids) | set(nested_qism_ids)
-                    return self.filter(qism_id__in=all_qism_ids)
-
-                return self.filter(qism_id__in=sibling_qism_ids)
-            return self.none()
-
-        elif user.role == 'section_manager':
-            # مدير القسم يرى منجزات قسمه فقط
+        if user.role == 'section_manager':
             if user.unit:
                 return self.filter(qism=user.unit)
             return self.none()

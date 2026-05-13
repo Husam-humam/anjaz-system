@@ -2,6 +2,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from apps.notifications.models import Notification
+from apps.notifications.services import NotificationService
 
 from .models import FormTemplate
 
@@ -33,11 +34,11 @@ def form_template_status_changed(sender, instance, **kwargs):
 
 
 def _notify_form_approved(template):
-    """إشعار منشئ القالب باعتماد الاستمارة"""
+    """إشعار منشئ القالب باعتماد الاستمارة — عبر NotificationService ليصل WebSocket"""
     if not template.created_by:
         return
 
-    Notification.objects.create(
+    NotificationService.create_notification(
         recipient=template.created_by,
         notification_type=Notification.NotificationType.FORM_APPROVED,
         title='تم اعتماد الاستمارة',
@@ -53,11 +54,11 @@ def _notify_form_approved(template):
 
 
 def _notify_form_rejected(template):
-    """إشعار منشئ القالب برفض الاستمارة"""
+    """إشعار منشئ القالب برفض الاستمارة — عبر NotificationService ليصل WebSocket"""
     if not template.created_by:
         return
 
-    Notification.objects.create(
+    NotificationService.create_notification(
         recipient=template.created_by,
         notification_type=Notification.NotificationType.FORM_REJECTED,
         title='تم رفض الاستمارة',
@@ -72,18 +73,33 @@ def _notify_form_rejected(template):
 
 
 def _notify_form_pending_approval(template):
-    """إشعار مديري قسم الإحصاء بوجود استمارة بانتظار الاعتماد"""
+    """
+    إشعار مديري قسم الإحصاء + قسم التخطيط (ضمن نطاق القسم) بوجود
+    استمارة بانتظار الاعتماد — عبر NotificationService ليصل WebSocket.
+    """
     from apps.accounts.models import User, UserRole
 
-    # الحصول على جميع مديري قسم الإحصاء النشطين
-    statistics_admins = User.objects.filter(
+    # كل الإحصائيين (نطاق كامل)
+    recipients = list(User.objects.filter(
         role=UserRole.STATISTICS_ADMIN,
         is_active=True,
-    )
+    ))
 
-    notifications = [
-        Notification(
-            recipient=admin_user,
+    # إضافة قسم التخطيط — لأن المنطق الحالي يسمح لهم بالاعتماد
+    # ضمن نطاقهم. نعتمد على `_planning_section_scope_qism_ids` لحصرهم.
+    from apps.submissions.services import _planning_section_scope_qism_ids
+    planners = User.objects.filter(
+        role=UserRole.PLANNING_SECTION,
+        is_active=True,
+    )
+    for planner in planners:
+        scope_ids = _planning_section_scope_qism_ids(planner)
+        if scope_ids is None or template.qism_id in scope_ids:
+            recipients.append(planner)
+
+    if recipients:
+        NotificationService.create_bulk_notifications(
+            recipients=recipients,
             notification_type=Notification.NotificationType.FORM_PENDING_APPROVAL,
             title='استمارة بانتظار الاعتماد',
             message=(
@@ -93,8 +109,3 @@ def _notify_form_pending_approval(template):
             related_model='FormTemplate',
             related_id=template.pk,
         )
-        for admin_user in statistics_admins
-    ]
-
-    if notifications:
-        Notification.objects.bulk_create(notifications)

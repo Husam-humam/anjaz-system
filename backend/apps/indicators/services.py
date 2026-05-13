@@ -16,9 +16,33 @@ class IndicatorService:
         indicator.save()
         return indicator
 
+    # الحقول الحسّاسة التي تُغيِّر سلوك aggregation التاريخي للمؤشر.
+    # تغييرها بعد وجود إجابات يكسر التقارير السابقة.
+    LOCKED_FIELDS_AFTER_ANSWERS = ('unit_type', 'accumulation_type')
+
     @staticmethod
     def update_indicator(indicator, data):
-        """تحديث مؤشر"""
+        """
+        تحديث مؤشر.
+        - `unit_type` و `accumulation_type` مقفلان إذا وُجدت إجابات تستند للمؤشر،
+          لأن تغييرهما يُبطل صحّة التقارير التاريخية (مثلاً sum → last_value).
+        """
+        sensitive_changed = any(
+            field in data
+            and getattr(indicator, field) != data[field]
+            for field in IndicatorService.LOCKED_FIELDS_AFTER_ANSWERS
+        )
+        if sensitive_changed:
+            from apps.submissions.models import SubmissionAnswer
+            has_answers = SubmissionAnswer.objects.filter(
+                form_item__indicator=indicator
+            ).exists()
+            if has_answers:
+                raise ValidationError(
+                    'لا يمكن تغيير نوع المؤشر أو طريقة تراكمه بعد وجود '
+                    'إجابات سابقة لأنه يُبطل صحّة التقارير التاريخية.'
+                )
+
         for key, value in data.items():
             setattr(indicator, key, value)
         indicator.full_clean()

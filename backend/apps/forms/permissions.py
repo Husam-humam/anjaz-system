@@ -43,8 +43,9 @@ class FormTemplatePermission(permissions.BasePermission):
     """
     صلاحيات قوالب الاستمارات:
     - القراءة: جميع المستخدمين المصادق عليهم (حسب النطاق)
-    - الإنشاء والتعديل: قسم التخطيط فقط
-    - الاعتماد والرفض: مدير قسم الإحصاء فقط
+    - الإنشاء والتعديل والحذف: قسم التخطيط ومدير قسم الإحصاء
+    - الاعتماد والرفض: مدير قسم الإحصاء فقط (يُتحقّق في الإجراء)
+    - إنشاء إصدار جديد: قسم التخطيط ومدير قسم الإحصاء
     """
     message = 'ليس لديك صلاحية للقيام بهذا الإجراء'
 
@@ -57,8 +58,8 @@ class FormTemplatePermission(permissions.BasePermission):
             return True
 
         # الإجراءات المخصصة - يتم التحقق من الصلاحيات في الإجراء نفسه
-        if view.action in ('submit', 'approve', 'reject', 'active'):
+        if view.action in ('submit', 'approve', 'reject', 'active', 'new_version'):
             return True
 
-        # الإنشاء والتعديل والحذف - قسم التخطيط فقط
-        return request.user.role == 'planning_section'
+        # الإنشاء والتعديل والحذف - قسم التخطيط ومدير قسم الإحصاء
+        return request.user.role in ('planning_section', 'statistics_admin')

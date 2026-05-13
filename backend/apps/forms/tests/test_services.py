@@ -141,19 +141,21 @@ class TestFormTemplateServiceSubmit:
 class TestFormTemplateServiceApprove:
     """اختبارات اعتماد القالب"""
 
-    def test_approve_supersedes_old_version(self):
-        """اختبار أن اعتماد قالب جديد يستبدل القالب المعتمد السابق"""
+    def test_approve_supersedes_same_effective_week(self):
+        """
+        اعتماد قالب جديد بنفس أسبوع تفعيل قالب معتمد سابق يُستبدِل القديم.
+        (سيناريو «نفس الأسبوع» — تحديث الخطة قبل أن تسري).
+        """
         qism = QismFactory()
         admin = StatisticsAdminFactory()
 
-        # إنشاء قالب معتمد سابقاً
+        # قالب مُجدوَل للأسبوع 5 من سنة 2099 (مستقبلي)
         old_template = FormTemplateFactory(
             qism=qism, status='approved', version=1,
-            effective_from_week=1, effective_from_year=2025,
+            effective_from_week=5, effective_from_year=2099,
         )
         FormTemplateItemFactory(form_template=old_template)
 
-        # إنشاء قالب جديد بانتظار الاعتماد
         new_template = FormTemplateFactory(
             qism=qism, status='pending_approval', version=2,
         )
@@ -163,18 +165,63 @@ class TestFormTemplateServiceApprove:
             new_template,
             approved_by=admin,
             effective_from_week=5,
-            effective_from_year=2025,
+            effective_from_year=2099,
         )
 
         assert result.status == FormTemplate.Status.APPROVED
         assert result.effective_from_week == 5
-        assert result.effective_from_year == 2025
-        assert result.approved_by == admin
-        assert result.approved_at is not None
+        assert result.effective_from_year == 2099
 
-        # التحقق من أن القالب السابق أصبح مُستبدَلاً
+        # القالب السابق (نفس التاريخ) أصبح مُستبدَلاً
         old_template.refresh_from_db()
         assert old_template.status == FormTemplate.Status.SUPERSEDED
+
+    def test_approve_future_template_keeps_currently_active(self):
+        """
+        اعتماد قالب لتاريخ مستقبلي يجب أن لا يُستبدِل القالب الفعّال حالياً.
+        الهدف: تجنّب ثغرة تغطية الأسابيع بين الآن وتاريخ التفعيل الجديد.
+        """
+        qism = QismFactory()
+        admin = StatisticsAdminFactory()
+
+        # قالب حالياً فعّال (effective_from في الماضي)
+        current_active = FormTemplateFactory(
+            qism=qism, status='approved', version=1,
+            effective_from_week=1, effective_from_year=2025,
+        )
+        FormTemplateItemFactory(form_template=current_active)
+
+        new_template = FormTemplateFactory(
+            qism=qism, status='pending_approval', version=2,
+        )
+        FormTemplateItemFactory(form_template=new_template)
+
+        FormTemplateService.approve_template(
+            new_template,
+            approved_by=admin,
+            effective_from_week=10,
+            effective_from_year=2099,
+        )
+
+        # القالب الفعّال يبقى APPROVED ليغطّي الأسابيع حتى يحلّ التاريخ الجديد
+        current_active.refresh_from_db()
+        assert current_active.status == FormTemplate.Status.APPROVED
+
+    def test_approve_rejects_retroactive_effective_date(self):
+        """اعتماد قالب بتاريخ تفعيل في الماضي يجب أن يُرفَض"""
+        template = FormTemplateFactory(status='pending_approval')
+        FormTemplateItemFactory(form_template=template)
+        admin = StatisticsAdminFactory()
+
+        with pytest.raises(ValidationError) as exc_info:
+            FormTemplateService.approve_template(
+                template,
+                approved_by=admin,
+                effective_from_week=1,
+                effective_from_year=2020,
+            )
+
+        assert 'ماضٍ' in str(exc_info.value)
 
     def test_approve_requires_pending_status(self):
         """اختبار فشل الاعتماد إذا لم يكن القالب بانتظار الاعتماد"""
@@ -187,7 +234,7 @@ class TestFormTemplateServiceApprove:
                 template,
                 approved_by=admin,
                 effective_from_week=1,
-                effective_from_year=2025,
+                effective_from_year=2099,
             )
 
         assert 'بانتظار الاعتماد' in str(exc_info.value)

@@ -72,31 +72,69 @@ class PeriodicReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        period_type = request.query_params.get('period_type', 'weekly')
+        import datetime
 
-        # التحقق من الصلاحيات
+        # نمطان مدعومان:
+        # 1) date range: from_date + to_date (ISO: YYYY-MM-DD)
+        # 2) period_type + year + period_number
+        from_date_str = request.query_params.get('from_date')
+        to_date_str = request.query_params.get('to_date')
+
+        from_date = None
+        to_date = None
+        if from_date_str and to_date_str:
+            try:
+                from_date = datetime.date.fromisoformat(from_date_str)
+                to_date = datetime.date.fromisoformat(to_date_str)
+            except ValueError:
+                return Response(
+                    {'detail': 'تنسيق التاريخ غير صالح. استخدم YYYY-MM-DD'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if from_date > to_date:
+                return Response(
+                    {'detail': 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        period_type = request.query_params.get('period_type', 'weekly')
         try:
             year = int(request.query_params.get('year', timezone.now().year))
         except (ValueError, TypeError):
-            return Response({'detail': 'قيمة السنة غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'detail': 'قيمة السنة غير صالحة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             period_number = int(request.query_params.get('period_number', 1))
         except (ValueError, TypeError):
-            return Response({'detail': 'رقم الفترة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'detail': 'رقم الفترة غير صالح'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         unit_id = request.query_params.get('unit_id')
         if unit_id:
             try:
                 unit_id = int(unit_id)
             except (ValueError, TypeError):
-                return Response({'detail': 'معرف الوحدة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
-            # التحقق من نطاق الصلاحية
+                return Response(
+                    {'detail': 'معرف الوحدة غير صالح'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             scope_error = _validate_unit_scope(request, unit_id)
             if scope_error:
                 return scope_error
 
-        data = ReportService.get_periodic_report(period_type, year, period_number, unit_id)
+        data = ReportService.get_periodic_report(
+            period_type=period_type if not from_date else None,
+            year=year if not from_date else None,
+            period_number=period_number if not from_date else None,
+            unit_id=unit_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
         return Response(data)
 
 

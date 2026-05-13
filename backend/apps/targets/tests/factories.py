@@ -9,7 +9,8 @@ class TargetFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Target
 
-    qism = factory.SubFactory(QismFactory)
+    # الافتراضي: مستهدف على مستوى قسم (متوافق مع السلوك القديم)
+    scope_unit = factory.SubFactory(QismFactory)
     indicator = factory.SubFactory(IndicatorFactory)
     year = 2025
     target_value = 100.0
