@@ -139,3 +139,146 @@ class OrganizationUnit(MPTTModel):
         """إرجاع المسار الكامل للكيان من الجذر حتى الكيان الحالي"""
         ancestors = self.get_ancestors(include_self=True)
         return ' / '.join(ancestor.name for ancestor in ancestors)
+
+
+# ═══════════════════════════════════════════════════════════════
+# نماذج التخصيصات (assignments) — تَحلّ محلّ qism_role في Phase F
+# ═══════════════════════════════════════════════════════════════
+
+class PlanningAssignment(models.Model):
+    """
+    تخصيص قسم تخطيط: يربط وحدة معيّنة بدور «قسم التخطيط» ويحدّد المديرية/
+    الدائرة الأم سياقياً (للعرض في التقارير). الأقسام المُشرَف عليها تُحدَّد
+    عبر `SupervisedUnit` (relationship منفصل لضمان أن قسماً واحداً = مُشرف
+    واحد).
+
+    قواعد الأعمال:
+    - وحدة واحدة لا يمكن أن تكون قسم تخطيط مرّتَين (OneToOne).
+    - الوحدة الأم (context_parent) للعرض فقط — لا تُقيّد نطاق الإشراف.
+    - عند حذف وحدة، يُمنع الحذف (PROTECT) لحماية البيانات المرتبطة.
+    """
+    planning_unit = models.OneToOneField(
+        OrganizationUnit,
+        on_delete=models.PROTECT,
+        related_name='planning_assignment',
+        verbose_name='الوحدة العاملة كقسم تخطيط',
+    )
+    context_parent = models.ForeignKey(
+        OrganizationUnit,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='+',  # لا حاجة لـ reverse accessor
+        verbose_name='المديرية/الدائرة الأم',
+        help_text='للعرض في التقارير فقط — لا يقيّد نطاق الإشراف',
+    )
+    notes = models.TextField(blank=True, default='', verbose_name='ملاحظات')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإنشاء')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='تاريخ التحديث')
+    created_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='created_planning_assignments',
+        verbose_name='أُنشئ بواسطة',
+    )
+
+    class Meta:
+        db_table = 'planning_assignments'
+        verbose_name = 'تخصيص قسم تخطيط'
+        verbose_name_plural = 'تخصيصات أقسام التخطيط'
+
+    def __str__(self):
+        return f'{self.planning_unit.name} (تخطيط)'
+
+
+class SupervisedUnit(models.Model):
+    """
+    قسم تحت إشراف قسم تخطيط معيّن.
+
+    قاعدة جوهريّة: `unit` هو OneToOne — كل وحدة يمكن أن تكون مُشرَفاً عليها
+    من قِبَل قسم تخطيط واحد فقط. لو احتاج النموذج لتعدّد المُشرفين لاحقاً،
+    نحوّل إلى FK مع unique_together(unit) ثم نُرخيه.
+    """
+    assignment = models.ForeignKey(
+        PlanningAssignment,
+        on_delete=models.CASCADE,
+        related_name='supervised_units',
+        verbose_name='تخصيص قسم التخطيط',
+    )
+    unit = models.OneToOneField(
+        OrganizationUnit,
+        on_delete=models.PROTECT,
+        related_name='supervisor_link',
+        verbose_name='الوحدة المُشرَف عليها',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإضافة')
+
+    class Meta:
+        db_table = 'supervised_units'
+        verbose_name = 'وحدة مُشرَف عليها'
+        verbose_name_plural = 'الوحدات المُشرَف عليها'
+        indexes = [
+            models.Index(fields=['assignment'], name='idx_supervised_assignment'),
+        ]
+
+    def __str__(self):
+        return f'{self.unit.name} ← {self.assignment.planning_unit.name}'
+
+    def clean(self):
+        super().clean()
+        # وحدة قسم التخطيط نفسها لا تُشرَف عليها بنفسها (يمكن تخفيف هذه القاعدة
+        # لاحقاً لو احتاج قسم تخطيط أن يُرسل منجزاته بنفسه — لكن يبقى منطقياً
+        # أن نمنع self-reference هنا).
+        if (
+            self.unit_id is not None
+            and self.assignment_id is not None
+            and self.unit_id == self.assignment.planning_unit_id
+        ):
+            raise ValidationError({
+                'unit': 'لا يمكن لقسم التخطيط أن يكون تحت إشراف نفسه.',
+            })
+
+
+class ViewScope(models.Model):
+    """
+    نطاق اطّلاع موسَّع لمستخدم — يمنحه رؤية وحدات إضافيّة لا يديرها.
+
+    حالات الاستخدام:
+    - دور `viewer`: ViewScope = نطاق الاطّلاع الكامل (لا يدير شيئاً).
+    - دور `planning_section`: ViewScope = نطاق إضافي فوق المُدار (مثل قسم
+      تخطيط دائرة يطّلع على أقسام مديريّاتها التي يديرها مخطّطو المديريّات).
+    - باقي الأدوار: ViewScope غير ضروري (admin له نطاق كامل ضمنياً،
+      section_manager محصور بقسمه).
+
+    المُنشئ المتوقّع لـ ViewScope هو `statistics_admin` فقط.
+    """
+    user = models.OneToOneField(
+        'accounts.User',
+        on_delete=models.CASCADE,
+        related_name='view_scope',
+        verbose_name='المستخدم',
+    )
+    viewable_units = models.ManyToManyField(
+        OrganizationUnit,
+        related_name='view_scope_users',
+        blank=True,
+        verbose_name='الوحدات القابلة للاطّلاع',
+    )
+    notes = models.TextField(blank=True, default='', verbose_name='ملاحظات')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإنشاء')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='تاريخ التحديث')
+    created_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='created_view_scopes',
+        verbose_name='أُنشئ بواسطة',
+    )
+
+    class Meta:
+        db_table = 'view_scopes'
+        verbose_name = 'نطاق اطّلاع'
+        verbose_name_plural = 'نطاقات الاطّلاع'
+
+    def __str__(self):
+        return f'ViewScope({self.user.full_name})'
