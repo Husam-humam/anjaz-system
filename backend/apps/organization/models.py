@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from mptt.models import MPTTModel, TreeForeignKey
 
-from .querysets import OrganizationUnitQuerySet
+from .querysets import OrganizationUnitManager, OrganizationUnitQuerySet
 
 
 class UnitType(models.TextChoices):
@@ -22,7 +22,7 @@ class QismRole(models.TextChoices):
 class OrganizationUnit(MPTTModel):
     """نموذج الكيان التنظيمي - يمثل الهيكل التنظيمي للمؤسسة"""
 
-    objects = OrganizationUnitQuerySet.as_manager()
+    objects = OrganizationUnitManager()
 
     name = models.CharField(
         max_length=200,

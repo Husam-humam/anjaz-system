@@ -1,4 +1,5 @@
 from django.db import models
+from mptt.managers import TreeManager
 
 
 class OrganizationUnitQuerySet(models.QuerySet):
@@ -44,3 +45,12 @@ class OrganizationUnitQuerySet(models.QuerySet):
         else:
             # مدير القسم يرى قسمه فقط
             return self.filter(pk=user.unit.pk)
+
+
+class OrganizationUnitManager(TreeManager.from_queryset(OrganizationUnitQuerySet)):
+    """
+    Manager مُدمَج: يجمع بين TreeManager (الذي يُوفّر MPTT operations مثل
+    `rebuild()`, `disable_mptt_updates()`, ...) والـ queryset المخصّص
+    لـ OrganizationUnit (active(), for_user_scope() ...).
+    """
+    pass
