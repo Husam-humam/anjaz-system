@@ -185,6 +185,12 @@ CHANNEL_LAYERS = {
     },
 }
 
+# External organization-structure system (source of truth for the org tree).
+# Empty URL means the integration is disabled — the sync command will refuse to run.
+EXTERNAL_ORG_API_URL = env('EXTERNAL_ORG_API_URL', default='')
+EXTERNAL_ORG_API_KEY = env('EXTERNAL_ORG_API_KEY', default='')
+EXTERNAL_ORG_API_TIMEOUT = env.int('EXTERNAL_ORG_API_TIMEOUT', default=15)
+
 # Logging
 LOGGING = {
     'version': 1,

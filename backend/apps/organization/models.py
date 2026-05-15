@@ -29,7 +29,7 @@ class OrganizationUnit(MPTTModel):
         verbose_name='اسم الكيان',
     )
     code = models.CharField(
-        max_length=20,
+        max_length=50,
         unique=True,
         verbose_name='الرمز',
     )
@@ -55,6 +55,18 @@ class OrganizationUnit(MPTTModel):
     is_active = models.BooleanField(
         default=True,
         verbose_name='نشط',
+    )
+    # ─── ربط بالنظام الخارجي ───
+    # المعرّف في النظام الخارجي (مصدر الحقيقة لبنية الهيكل التنظيمي).
+    # الوحدات اليدويّة القديمة (قبل المزامنة) تبقى بـ NULL ولا تُمسّ بالمزامنة.
+    external_id = models.PositiveIntegerField(
+        null=True, blank=True, unique=True, db_index=True,
+        verbose_name='المعرّف الخارجي',
+        help_text='معرّف الوحدة في نظام الهيكل التنظيمي المركزي',
+    )
+    external_synced_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='آخر مزامنة مع النظام الخارجي',
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
