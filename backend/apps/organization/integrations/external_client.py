@@ -114,14 +114,16 @@ class ExternalOrgClient:
         ترجع قائمة عقد جذريّة، كل عقدة لها `children`. كل عقدة تحتوي
         على الأقلّ: id, name, code, is_main_unit, level, children_count, children.
 
-        نُمرّر `is_active=false` افتراضياً لجلب الكل (شامل المعطّل) — حتى
-        نستطيع تحديث `is_active=False` للوحدات المعطّلة في النظام الخارجي.
+        ملاحظة مهمّة عن `is_active`:
+        - `is_active=true` → نشطة فقط
+        - `is_active=false` → معطّلة فقط (تصفية مُعكوسة!)
+        - عدم تمريره → كل الوحدات (نشطة ومعطّلة)
+        افتراضياً نستدعيه بدون فلتر لجلب الكل.
         """
         params: dict[str, Any] = {'max_depth': max_depth}
         if active_only:
             params['is_active'] = 'true'
-        else:
-            params['is_active'] = 'false'
+        # وإلا: لا نُمرّر is_active لجلب الكل (المنطق الصحيح للمزامنة)
 
         data = self._get('units/tree/', params=params)
         if isinstance(data, dict):

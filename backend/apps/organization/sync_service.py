@@ -32,15 +32,27 @@ logger = logging.getLogger(__name__)
 
 
 # خريطة أنواع الوحدات: external unit_type_name (بالعربيّة) → unit_type في «أنجز»
-# قابلة للتوسعة لو ظهرت أنواع جديدة (مثلاً «إدارة عامّة» تُعامَل كدائرة).
+#
+# ملاحظة معماريّة: الأسماء على اليسار هي حرفياً ما يُرجعه النظام الخارجي في
+# `unit_type_name`. أنواع «أنجز» على اليمين أقلّ تعبيراً (٣ مستويات: daira/
+# mudiriya/qism) لكن سنُلغي هذه التفرقة كلياً في Phase F بعد تبنّي نموذج
+# التخصيصات الصريحة. حتى ذلك الحين، نُسقط الأنواع الإضافيّة على الأقرب:
+# - «شعبة» (مستوى أدنى من قسم) → qism (تُعامَل كوحدة تُرسِل منجزات)
+# - «وحدة» (نوع جنريك في النظام الخارجي) → qism (تخمين معقول للاستخدام)
+#
+# يمكن للأدمن تعديل النوع يدوياً بعد المزامنة إن أراد.
 DEFAULT_UNIT_TYPE_MAP: dict[str, str] = {
     'دائرة': UnitType.DAIRA,
     'مديرية': UnitType.MUDIRIYA,
     'قسم': UnitType.QISM,
-    # مرادفات شائعة محتملة:
+    'شعبة': UnitType.QISM,
+    'وحدة': UnitType.QISM,
+    # مرادفات شائعة (مع الـ ال التعريف):
     'الدائرة': UnitType.DAIRA,
     'المديرية': UnitType.MUDIRIYA,
     'القسم': UnitType.QISM,
+    'الشعبة': UnitType.QISM,
+    'الوحدة': UnitType.QISM,
 }
 
 
@@ -228,15 +240,15 @@ class OrganizationSyncService:
                 continue
 
             local = local_by_external.get(ext_id)
+            # كل upsert في savepoint مستقل — فشل وحدة لا يكسر معاملة المزامنة
             try:
-                if local is None:
-                    # إنشاء جديد
-                    self._create_unit(ext_id, ext_data, mapped_type, now)
-                    report.created += 1
-                else:
-                    # تحديث موجود
-                    if self._update_unit(local, ext_data, mapped_type, now):
-                        report.updated += 1
+                with transaction.atomic():
+                    if local is None:
+                        self._create_unit(ext_id, ext_data, mapped_type, now)
+                        report.created += 1
+                    else:
+                        if self._update_unit(local, ext_data, mapped_type, now):
+                            report.updated += 1
             except Exception as exc:  # noqa: BLE001
                 logger.exception('فشل في upsert external_id=%s', ext_id)
                 report.errors.append(f'وحدة {ext_id}: {exc}')
@@ -318,7 +330,7 @@ class OrganizationSyncService:
         unit = OrganizationUnit(
             external_id=external_id,
             name=ext_data['name'],
-            code=ext_data['code'] or f'EXT-{external_id}',
+            code=self._safe_code(ext_data['code'], external_id),
             unit_type=mapped_type,
             parent=None,
             is_active=ext_data.get('is_active', True),
@@ -331,6 +343,20 @@ class OrganizationSyncService:
         unit.save_base()
         return unit
 
+    def _safe_code(self, external_code: str | None, external_id: int) -> str:
+        """
+        يُرجع كود فريد. إذا كان الكود الخارجي مُستخدماً من قبل وحدة محليّة
+        أخرى (يدويّة أو من sync سابق بـ id مختلف)، نُلحق `-EXT{id}` لتفاديه.
+        """
+        candidate = external_code or f'EXT-{external_id}'
+        # نفحص فقط الوحدات التي ليست هذه نفسها (different external_id)
+        conflict = OrganizationUnit.objects.filter(code=candidate).exclude(
+            external_id=external_id,
+        ).exists()
+        if conflict:
+            candidate = f'{candidate}-EXT{external_id}'
+        return candidate
+
     def _update_unit(
         self,
         local: OrganizationUnit,
@@ -342,7 +368,7 @@ class OrganizationSyncService:
         يُحدِّث وحدة موجودة. يُرجع True إذا تغيّر شيء فعلاً.
         لا يلمس `qism_role` ولا أي حقل محلي خاص.
         """
-        new_code = ext_data['code'] or f'EXT-{local.external_id}'
+        new_code = self._safe_code(ext_data['code'], local.external_id)
         changed = (
             local.name != ext_data['name']
             or local.code != new_code

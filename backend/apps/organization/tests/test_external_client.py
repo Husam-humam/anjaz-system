@@ -96,10 +96,11 @@ class TestExternalOrgClientCalls:
 
         assert len(tree) == 1
         assert tree[0]['name'] == 'الدائرة الرئيسية'
-        # نتأكّد من params الافتراضية
+        # نتأكّد من params الافتراضية: نُمرّر max_depth فقط — لا is_active
+        # لأن `is_active=false` في النظام الخارجي = «المعطّلة فقط» (سلوك معكوس!)
         params = mock_get.call_args[1]['params']
         assert params['max_depth'] == 10
-        assert params['is_active'] == 'false'  # نجلب الكل افتراضياً
+        assert 'is_active' not in params  # لجلب الكل (نشطة + معطّلة)
 
     def test_get_units_tree_active_only(self, mock_get):
         mock_get.return_value = make_response({'tree': []})
