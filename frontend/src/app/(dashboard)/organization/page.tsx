@@ -417,7 +417,8 @@ function QismAssignmentDialog({
     mutationFn: ({ assignmentId, unitId }: { assignmentId: number; unitId: number }) =>
       addSupervisedUnit(assignmentId, unitId),
     onSuccess: () => {
-      setSearchTerm("");
+      // نُبقي searchTerm كما هو ليتمكّن الأدمن من إضافة عدّة أقسام
+      // من نفس نتائج البحث (مثلاً كل أقسام مديرية معيّنة) دون إعادة الكتابة.
       setActionError(null);
       invalidateAll();
     },
