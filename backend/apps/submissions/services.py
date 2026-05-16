@@ -1318,20 +1318,48 @@ def _has_actual_value(answer, indicator):
 
 def _planning_section_scope_qism_ids(user):
     """
-    يُرجع مجموعة معرّفات الأقسام التي يشرف عليها مستخدم قسم التخطيط.
-    - إذا كان قسم التخطيط له أب (تابع لمديرية/دائرة): الأقسام التابعة لذلك الأب فقط.
-    - إذا كان قسم التخطيط بدون أب (مركزي): يُرجع None للإشارة إلى نطاق مفتوح (كل الأقسام).
+    يُرجع مجموعة معرّفات الأقسام التي يستطيع المستخدم **إدارتها**
+    (اعتماد/رفض/تعديل المنجزات).
+
+    دلالات القيمة المُرجَعة:
+    - `None` → نطاق كامل (statistics_admin، أو حالات legacy للمخطّط المركزي).
+    - `set()` فارغة → لا صلاحيّة (viewer، أو planner بدون assignment).
+    - `set({1,2,3})` → معرّفات الأقسام تحت إشرافه.
+
+    منطق التحديد (مرتّب بالأولويّة):
+    1. **النموذج الجديد (Phase C+)**: قسم التخطيط له `PlanningAssignment` →
+       النطاق = `SupervisedUnit.unit_id`s.
+    2. **fallback لـ MPTT (legacy)**: إن لم يوجد `PlanningAssignment` (لم تُهاجَر
+       البيانات بعد في Phase E)، نُعيد سلوك الـ MPTT القديم لمنع كسر النظام
+       أثناء فترة الانتقال.
+
+    سيُحذف الـ fallback في Phase F بعد تأكّد المهاجرة.
     """
+    role = getattr(user, 'role', None)
+
+    # دور viewer لا يدير شيئاً
+    if role == 'viewer':
+        return set()
+
     if not user.unit:
         return set()
 
+    # ── النموذج الجديد ──
+    from apps.organization.models import PlanningAssignment
+    try:
+        assignment = PlanningAssignment.objects.get(planning_unit_id=user.unit_id)
+        return set(
+            assignment.supervised_units.values_list('unit_id', flat=True)
+        )
+    except PlanningAssignment.DoesNotExist:
+        pass
+
+    # ── fallback (legacy MPTT) ──
     parent_id = user.unit.parent_id
     if parent_id is None:
-        # قسم تخطيط مركزي — صلاحية على كل الأقسام
+        # قسم تخطيط مركزي legacy — صلاحية على كل الأقسام
         return None
 
-    # استعلام مباشر بالـ id يضمن قراءة قيم MPTT المحدّثة من قاعدة البيانات
-    # (تجنّب MPTT cache staleness عند إنشاء عناصر الشجرة في وقت التشغيل)
     parent = OrganizationUnit.objects.get(pk=parent_id)
     descendant_ids = set(
         parent.get_descendants(include_self=False)
@@ -1339,6 +1367,51 @@ def _planning_section_scope_qism_ids(user):
         .values_list('id', flat=True)
     )
     return descendant_ids
+
+
+def _user_view_scope_qism_ids(user):
+    """
+    يُرجع مجموعة معرّفات الوحدات التي يستطيع المستخدم **رؤيتها** (read).
+
+    الفرق عن `_planning_section_scope_qism_ids`:
+    - مدير الإحصاء: `None` (نطاق كامل)
+    - planner: SupervisedUnit ∪ ViewScope (managed + extra view-only)
+    - viewer: ViewScope فقط (لا إدارة)
+    - section_manager: وحدته فقط
+    """
+    role = getattr(user, 'role', None)
+
+    if role == 'statistics_admin':
+        return None
+
+    if role == 'section_manager':
+        return {user.unit_id} if user.unit_id else set()
+
+    # planner أو viewer — نبدأ بنطاق الإدارة (إن وُجد) ونُضيف ViewScope
+    manage_scope = _planning_section_scope_qism_ids(user)
+    if manage_scope is None:
+        # legacy central planner — نطاق كامل
+        return None
+
+    visible = set(manage_scope)
+
+    # نُضيف وحدات ViewScope إن وُجدت
+    try:
+        scope = user.view_scope
+        visible |= set(scope.viewable_units.values_list('id', flat=True))
+    except Exception:  # ViewScope.DoesNotExist أو AttributeError
+        pass
+
+    return visible
+
+
+def _user_can_review_submissions(user):
+    """
+    يُحدّد إن كان للمستخدم صلاحيّة إجرائيّة على المنجزات
+    (اعتماد/رفض/تعديل). يُستخدم لمنع viewer من أي إجراء.
+    """
+    role = getattr(user, 'role', None)
+    return role in ('statistics_admin', 'planning_section', 'section_manager')
 
 
 # ========================================

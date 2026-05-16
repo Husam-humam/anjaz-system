@@ -42,24 +42,21 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
             'items__indicator'
         ).order_by('-created_at')
 
-        # تصفية حسب صلاحيات المستخدم — نستخدم المنطق الموحّد
-        # لدعم المخطط على مستوى المديرية أو الدائرة أو المخطط المركزي
+        # تصفية حسب نطاق الرؤية للمستخدم (view scope)
         user = self.request.user
         if user.role == 'statistics_admin':
             pass  # نطاق كامل
-        elif user.role == 'planning_section':
-            from apps.submissions.services import (
-                _planning_section_scope_qism_ids,
-            )
-            scope_ids = _planning_section_scope_qism_ids(user)
+        elif user.role == 'section_manager':
+            queryset = queryset.filter(qism=user.unit)
+        elif user.role in ('planning_section', 'viewer'):
+            from apps.submissions.services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
             if scope_ids is None:
-                pass  # مخطط مركزي — كل القوالب
+                pass  # legacy central planner
             elif not scope_ids:
                 return queryset.none()
             else:
                 queryset = queryset.filter(qism_id__in=scope_ids)
-        elif user.role == 'section_manager':
-            queryset = queryset.filter(qism=user.unit)
         else:
             return queryset.none()
 

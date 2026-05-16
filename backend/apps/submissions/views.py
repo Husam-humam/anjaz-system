@@ -155,13 +155,14 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
         period = self.get_object()
         user = request.user
 
-        # تحديد نطاق الأقسام حسب دور المستخدم
+        # تحديد نطاق الأقسام حسب دور المستخدم (view scope: managed + ViewScope)
         qisms_qs = OrganizationUnit.objects.filter(
             unit_type='qism', qism_role='regular', is_active=True,
         )
-        if user.role == 'planning_section':
-            scope_ids = _planning_section_scope_qism_ids(user)
-            if scope_ids is not None:  # None = نطاق مركزي يشمل الجميع
+        if user.role != 'statistics_admin':
+            from .services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
+            if scope_ids is not None:
                 qisms_qs = qisms_qs.filter(id__in=scope_ids)
 
         # جلب المنجزات لهذه الفترة
@@ -261,14 +262,15 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
         else:
             scope_unit = None
 
-        # فحص صلاحية المستخدم على الوحدة المطلوبة
-        if scope_unit and user.role == 'planning_section':
-            scope_ids = _planning_section_scope_qism_ids(user)
+        # فحص صلاحية المستخدم على الوحدة المطلوبة (view scope)
+        from .services import _user_view_scope_qism_ids
+        if scope_unit and user.role in ('planning_section', 'viewer'):
+            scope_ids = _user_view_scope_qism_ids(user)
             if scope_ids is not None:
-                # يجب أن تكون الوحدة أو أحفادها ضمن نطاق المخطط
+                # يجب أن تكون الوحدة (أو أحفادها) ضمن نطاق الرؤية
                 allowed_unit_ids = set(scope_ids)
-                # نسمح للمخطط بمشاهدة مديرياتهم ودوائرهم (الأجداد الخاصة بهم)
-                if user.unit and user.unit.parent:
+                # السماح بعرض الأجداد الخاصة بقسم التخطيط
+                if user.role == 'planning_section' and user.unit and user.unit.parent:
                     directorate = user.unit.parent
                     allowed_unit_ids.update(
                         directorate.get_descendants(include_self=True)
@@ -290,7 +292,6 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                 )
 
         # حساب معرّفات الأقسام ضمن النطاق
-        from .services import _planning_section_scope_qism_ids as _scope_helper
         if scope_unit is None:
             # المؤسسة كاملة
             qism_ids = list(
@@ -298,9 +299,9 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                     unit_type='qism', qism_role='regular', is_active=True,
                 ).values_list('id', flat=True)
             )
-            # لمخطط: قيّد بالنطاق
-            if user.role == 'planning_section':
-                scope_ids = _scope_helper(user)
+            # لـ non-admin: قيّد بنطاق الرؤية
+            if user.role != 'statistics_admin':
+                scope_ids = _user_view_scope_qism_ids(user)
                 if scope_ids is not None:
                     qism_ids = [i for i in qism_ids if i in scope_ids]
         elif scope_unit.unit_type == 'qism':
@@ -583,14 +584,18 @@ class WeeklySubmissionViewSet(viewsets.ModelViewSet):
 
         if user.role == 'statistics_admin':
             pass  # جميع المنجزات
-        elif user.role == 'planning_section':
-            scope_ids = _planning_section_scope_qism_ids(user)
-            if scope_ids is None:
-                pass  # نطاق مركزي — جميع المنجزات
-            else:
-                queryset = queryset.filter(qism_id__in=scope_ids)
         elif user.role == 'section_manager':
             queryset = queryset.filter(qism=user.unit)
+        elif user.role in ('planning_section', 'viewer'):
+            # planner / viewer: نطاق الرؤية (managed + ViewScope)
+            from .services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
+            if scope_ids is None:
+                pass  # legacy central planner
+            elif not scope_ids:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(qism_id__in=scope_ids)
         else:
             queryset = queryset.none()
 
@@ -877,14 +882,15 @@ class WeeklySubmissionViewSet(viewsets.ModelViewSet):
         submission = self.get_object()
         user = request.user
 
-        # فحص الصلاحية
+        # فحص الصلاحية (audit log read-only — يستخدم view scope)
         allowed = False
         if user.role == 'statistics_admin':
             allowed = True
         elif user.role == 'section_manager' and submission.qism_id == user.unit_id:
             allowed = True
-        elif user.role == 'planning_section':
-            scope_ids = _planning_section_scope_qism_ids(user)
+        elif user.role in ('planning_section', 'viewer'):
+            from .services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
             if scope_ids is None or submission.qism_id in scope_ids:
                 allowed = True
 
@@ -1082,16 +1088,19 @@ class QualitativeViewSet(viewsets.GenericViewSet):
                 submission__weekly_period_id=weekly_period_id
             )
 
-        # تحديد النطاق حسب دور المستخدم
+        # تحديد النطاق حسب دور المستخدم (view scope: managed + ViewScope)
         user = request.user
-        if user.role == 'planning_section':
-            scope_ids = _planning_section_scope_qism_ids(user)
-            if scope_ids is not None:  # None = نطاق مركزي يشمل الجميع
-                queryset = queryset.filter(
-                    submission__qism_id__in=scope_ids
-                )
-        elif user.role == 'section_manager':
+        if user.role == 'section_manager':
             queryset = queryset.filter(submission__qism=user.unit)
+        elif user.role != 'statistics_admin':
+            from .services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
+            if scope_ids is None:
+                pass  # نطاق كامل (legacy)
+            elif not scope_ids:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(submission__qism_id__in=scope_ids)
 
         queryset = queryset.order_by('-submission__weekly_period__year',
                                      '-submission__weekly_period__week_number')

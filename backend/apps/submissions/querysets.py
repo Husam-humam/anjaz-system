@@ -21,27 +21,25 @@ class SubmissionQuerySet(models.QuerySet):
 
     def for_user_scope(self, user):
         """
-        تصفية المنجزات حسب صلاحيات المستخدم:
-        - statistics_admin: جميع المنجزات
-        - planning_section: منجزات الأقسام التابعة لنفس المديرية/الدائرة،
-          أو جميع المنجزات إذا كان قسم التخطيط مركزياً (بدون أب)
-        - section_manager: منجزات قسمه فقط
+        تصفية المنجزات حسب نطاق **الرؤية** للمستخدم (read scope).
+
+        ملاحظة: هذا مختلف عن نطاق **الإدارة** (الذي يُحدّد مَن يستطيع
+        اعتماد/رفض/تعديل). الرؤية أوسع: تشمل المُدار + ViewScope additions.
+
+        - statistics_admin: جميع المنجزات (نطاق كامل)
+        - planning_section: المُدار + ViewScope (إن وُجد)
+        - viewer: ViewScope فقط
+        - section_manager: قسمه فقط
         """
+        from .services import _user_view_scope_qism_ids
+
         if user.role == 'statistics_admin':
             return self.all()
 
-        if user.role == 'planning_section':
-            from .services import _planning_section_scope_qism_ids
-            scope_ids = _planning_section_scope_qism_ids(user)
-            if scope_ids is None:  # نطاق مركزي
-                return self.all()
-            if not scope_ids:
-                return self.none()
-            return self.filter(qism_id__in=scope_ids)
-
-        if user.role == 'section_manager':
-            if user.unit:
-                return self.filter(qism=user.unit)
+        scope_ids = _user_view_scope_qism_ids(user)
+        # None = نطاق كامل (legacy central planner)
+        if scope_ids is None:
+            return self.all()
+        if not scope_ids:
             return self.none()
-
-        return self.none()
+        return self.filter(qism_id__in=scope_ids)

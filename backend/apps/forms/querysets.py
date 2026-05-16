@@ -25,24 +25,23 @@ class FormTemplateQuerySet(models.QuerySet):
         return self.filter(qism_id=qism_id)
 
     def for_user_scope(self, user):
-        """تصفية القوالب حسب صلاحيات المستخدم"""
+        """
+        تصفية القوالب حسب نطاق الرؤية للمستخدم (view scope).
+        يستخدم `_user_view_scope_qism_ids` الموحَّد — يدعم planner و viewer
+        و section_manager و statistics_admin.
+        """
         if user.role == 'statistics_admin':
             return self.all()
-        elif user.role == 'planning_section':
-            # قسم التخطيط يرى قوالب أقسام مديريته فقط
-            planning_unit = user.unit
-            if planning_unit and planning_unit.parent:
-                directorate = planning_unit.parent
-                # الأقسام العادية التابعة لنفس المديرية/الدائرة
-                return self.filter(
-                    qism__parent=directorate,
-                    qism__unit_type='qism',
-                    qism__qism_role='regular',
-                )
-            return self.none()
-        elif user.role == 'section_manager':
-            # مدير القسم يرى قوالب قسمه فقط
+        if user.role == 'section_manager':
             return self.filter(qism=user.unit)
+        if user.role in ('planning_section', 'viewer'):
+            from apps.submissions.services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
+            if scope_ids is None:
+                return self.all()  # legacy central planner
+            if not scope_ids:
+                return self.none()
+            return self.filter(qism_id__in=scope_ids)
         return self.none()
 
     def active_for_qism(self, qism_id, year=None, week_number=None):
