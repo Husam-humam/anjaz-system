@@ -86,17 +86,39 @@ function qismBadge(node: OrganizationUnit) {
   );
 }
 
-/** يجمع كل الأقسام في الشجرة بشكل مُسطَّح (للقوائم المنسدلة). */
-function flattenQisms(nodes: OrganizationUnit[], parentName: string | null = null): Array<OrganizationUnit & { parent_path: string | null }> {
-  const out: Array<OrganizationUnit & { parent_path: string | null }> = [];
+/** يبحث عن عقدة بـ id داخل شجرة متفرّعة. */
+function findNode(
+  nodes: OrganizationUnit[],
+  id: number,
+): OrganizationUnit | null {
   for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children?.length) {
+      const found = findNode(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** يجمع كل أحفاد عقدة معيّنة الذين هم أقسام نشطة، مع مسار الأب للعرض. */
+function collectDescendantQisms(
+  root: OrganizationUnit,
+  parentPath: string | null = null,
+): Array<OrganizationUnit & { parent_path: string | null }> {
+  const out: Array<OrganizationUnit & { parent_path: string | null }> = [];
+  const walk = (node: OrganizationUnit, path: string | null) => {
     if (node.unit_type === "qism" && node.is_active) {
-      out.push({ ...node, parent_path: parentName });
+      out.push({ ...node, parent_path: path });
     }
     if (node.children?.length) {
-      const childPath = parentName ? `${parentName} / ${node.name}` : node.name;
-      out.push(...flattenQisms(node.children, childPath));
+      const childPath = path ? `${path} / ${node.name}` : node.name;
+      for (const child of node.children) walk(child, childPath);
     }
+  };
+  // نبدأ من children مباشرة لأن root نفسه نريد استثناءه (لو كان قسماً)
+  for (const child of root.children ?? []) {
+    walk(child, root.name);
   }
   return out;
 }
@@ -126,10 +148,6 @@ export default function OrganizationPage() {
     enabled: !!tree && isAdmin(),
   });
 
-  const allQisms = useMemo(
-    () => (tree ? flattenQisms(tree) : []),
-    [tree],
-  );
   const assignments = useMemo(
     () => assignmentsData?.results ?? [],
     [assignmentsData],
@@ -287,7 +305,7 @@ export default function OrganizationPage() {
       <QismAssignmentDialog
         qism={selectedQism}
         assignments={assignments}
-        allQisms={allQisms}
+        tree={tree ?? []}
         onClose={() => setSelectedQism(null)}
       />
     </div>
@@ -301,14 +319,14 @@ export default function OrganizationPage() {
 interface QismAssignmentDialogProps {
   qism: OrganizationUnit | null;
   assignments: PlanningAssignment[];
-  allQisms: Array<OrganizationUnit & { parent_path: string | null }>;
+  tree: OrganizationUnit[];
   onClose: () => void;
 }
 
 function QismAssignmentDialog({
   qism,
   assignments,
-  allQisms,
+  tree,
   onClose,
 }: QismAssignmentDialogProps) {
   const queryClient = useQueryClient();
@@ -386,12 +404,18 @@ function QismAssignmentDialog({
     ? "supervised"
     : "unassigned";
 
-  // الأقسام المتاحة للإشراف عليها (غير مُسنَدة كتخطيط ولا مُشرَف عليها بالفعل)
+  // الأقسام المتاحة للإشراف = أحفاد parent قسم التخطيط (أي ضمن نفس فرع الشجرة)
+  // غير مُسنَدة كتخطيط ولا مُشرَف عليها بالفعل. الـ planning_unit نفسه يُستثنى تلقائياً
+  // لأن نقطة الانطلاق هي parent (وlik collectDescendantQisms يستبعد الجذر نفسه).
   const planningUnitIds = new Set(assignments.map((a) => a.planning_unit));
   const supervisedUnitIds = new Set(
     assignments.flatMap((a) => a.supervised_units.map((s) => s.unit)),
   );
-  const availableForSupervision = allQisms.filter(
+
+  const parentNode = qism.parent != null ? findNode(tree, qism.parent) : null;
+  const branchQisms = parentNode ? collectDescendantQisms(parentNode) : [];
+
+  const availableForSupervision = branchQisms.filter(
     (u) =>
       u.id !== qism.id &&
       !planningUnitIds.has(u.id) &&
@@ -485,6 +509,13 @@ function QismAssignmentDialog({
               <Label className="text-sm font-semibold">
                 إضافة قسم تحت إشرافه
               </Label>
+              <p className="text-xs text-gray-500">
+                تُعرض فقط الأقسام ضمن فرع{" "}
+                <span className="font-semibold">
+                  {qism.parent_name ?? "نفس الجذر"}
+                </span>
+                .
+              </p>
               <div className="flex flex-col sm:flex-row gap-2">
                 <select
                   value={unitToAdd}
@@ -497,7 +528,7 @@ function QismAssignmentDialog({
                 >
                   <option value="">
                     {availableForSupervision.length === 0
-                      ? "لا توجد أقسام متاحة"
+                      ? "لا توجد أقسام متاحة ضمن هذا الفرع"
                       : "-- اختر قسماً --"}
                   </option>
                   {availableForSupervision.map((u) => (
