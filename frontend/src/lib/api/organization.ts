@@ -1,8 +1,11 @@
 import apiClient from "./client";
 import type {
+  ExternalUnitTypeMapping,
   OrganizationUnit,
   OrganizationSyncReport,
   PlanningAssignment,
+  UnitTypeMappingRefreshResult,
+  UnitTypeTreatment,
   ViewScope,
 } from "@/types/organization";
 import type { ApiResponse } from "@/types/api";
@@ -158,4 +161,32 @@ export async function upsertViewScope(payload: {
 
 export async function deleteViewScope(id: number): Promise<void> {
   await apiClient.delete(`/organization/view-scopes/${id}/`);
+}
+
+// ─── تطابق أنواع الوحدات الخارجيّة ───────────────
+
+export async function getUnitTypeMappings(): Promise<ApiResponse<ExternalUnitTypeMapping>> {
+  const { data } = await apiClient.get<ApiResponse<ExternalUnitTypeMapping>>(
+    "/organization/unit-type-mappings/",
+    { params: { page_size: "1000" } },
+  );
+  return data;
+}
+
+export async function updateUnitTypeMapping(
+  id: number,
+  treat_as: UnitTypeTreatment,
+): Promise<ExternalUnitTypeMapping> {
+  const { data } = await apiClient.patch<ExternalUnitTypeMapping>(
+    `/organization/unit-type-mappings/${id}/`,
+    { treat_as },
+  );
+  return data;
+}
+
+export async function refreshUnitTypeMappings(): Promise<UnitTypeMappingRefreshResult> {
+  const { data } = await apiClient.post<UnitTypeMappingRefreshResult>(
+    "/organization/unit-type-mappings/refresh/",
+  );
+  return data;
 }

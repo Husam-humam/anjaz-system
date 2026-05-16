@@ -3,9 +3,16 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import OrganizationUnit, PlanningAssignment, SupervisedUnit, ViewScope
+from .models import (
+    ExternalUnitTypeMapping,
+    OrganizationUnit,
+    PlanningAssignment,
+    SupervisedUnit,
+    ViewScope,
+)
 from .permissions import IsStatisticsAdmin, IsStatisticsAdminOrReadOnly
 from .serializers import (
+    ExternalUnitTypeMappingSerializer,
     OrganizationUnitSerializer,
     OrganizationTreeSerializer,
     PlanningAssignmentSerializer,
@@ -159,3 +166,41 @@ class ViewScopeViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+
+class ExternalUnitTypeMappingViewSet(viewsets.ModelViewSet):
+    """
+    إدارة تطابق أنواع الوحدات الخارجيّة → داخليّة.
+    يسمح بالـ list / patch فقط — لا create/delete (الجدول يُملأ آلياً عبر
+    `refresh` action).
+    """
+    permission_classes = [IsStatisticsAdmin]
+    queryset = ExternalUnitTypeMapping.objects.all().order_by('external_type_name')
+    serializer_class = ExternalUnitTypeMappingSerializer
+    http_method_names = ['get', 'patch', 'post', 'head', 'options']
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='refresh',
+    )
+    def refresh_from_external(self, request):
+        """
+        يجلب أنواع الوحدات من النظام الخارجي ويُنشئ سطراً جديداً في الجدول
+        لكل نوع غير معروف. يُرجع الحقول كاملة + التقرير.
+        """
+        from .sync_service import OrganizationSyncService
+        try:
+            report = OrganizationSyncService().refresh_unit_type_mappings()
+        except Exception as exc:  # noqa: BLE001
+            return Response(
+                {'detail': f'فشل جلب أنواع الوحدات: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({
+            **report,
+            'mappings': ExternalUnitTypeMappingSerializer(
+                ExternalUnitTypeMapping.objects.all().order_by('external_type_name'),
+                many=True,
+            ).data,
+        })

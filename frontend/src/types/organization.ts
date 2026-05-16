@@ -55,6 +55,31 @@ export interface PlanningAssignment {
   created_by_name: string | null;
 }
 
+/** تطابق نوع وحدة خارجي → نوع داخلي */
+export type UnitTypeTreatment =
+  | "daira"
+  | "mudiriya"
+  | "qism"
+  | "ignore"
+  | null;
+
+export interface ExternalUnitTypeMapping {
+  id: number;
+  external_type_name: string;
+  external_type_id: number | null;
+  treat_as: UnitTypeTreatment;
+  treat_as_display: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnitTypeMappingRefreshResult {
+  created: number;
+  existing: number;
+  mappings: ExternalUnitTypeMapping[];
+}
+
 /** نطاق اطّلاع لمستخدم */
 export interface ViewScope {
   id: number;

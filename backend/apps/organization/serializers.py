@@ -1,6 +1,12 @@
 from rest_framework import serializers
 
-from .models import OrganizationUnit, PlanningAssignment, SupervisedUnit, ViewScope
+from .models import (
+    ExternalUnitTypeMapping,
+    OrganizationUnit,
+    PlanningAssignment,
+    SupervisedUnit,
+    ViewScope,
+)
 
 
 class OrganizationUnitSerializer(serializers.ModelSerializer):
@@ -141,3 +147,33 @@ class ViewScopeWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ViewScope
         fields = ['user', 'viewable_units', 'notes']
+
+
+class ExternalUnitTypeMappingSerializer(serializers.ModelSerializer):
+    """قراءة/كتابة تطابق نوع الوحدة الخارجي."""
+    treat_as_display = serializers.CharField(
+        source='get_treat_as_display', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = ExternalUnitTypeMapping
+        fields = [
+            'id', 'external_type_name', 'external_type_id',
+            'treat_as', 'treat_as_display',
+            'notes', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'external_type_name', 'external_type_id',
+            'created_at', 'updated_at',
+        ]
+
+    def validate_treat_as(self, value):
+        # السماح بـ None / 'daira' / 'mudiriya' / 'qism' / 'ignore'
+        if value in ('', None):
+            return None
+        allowed = {choice[0] for choice in ExternalUnitTypeMapping.TreatAs.choices}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'القيمة يجب أن تكون إحدى: {", ".join(allowed)}'
+            )
+        return value

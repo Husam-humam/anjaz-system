@@ -36,6 +36,7 @@ import {
   QISM_ASSIGNMENT_LABELS,
 } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
+import { UnitTypeSettingsDialog } from "./UnitTypeSettingsDialog";
 import {
   AlertCircle,
   ChevronDown,
@@ -43,6 +44,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Trash2,
   X,
 } from "lucide-react";
@@ -150,6 +152,7 @@ export default function OrganizationPage() {
   const [syncReport, setSyncReport] = useState<OrganizationSyncReport | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [selectedQism, setSelectedQism] = useState<OrganizationUnit | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const {
     data: tree,
@@ -282,12 +285,25 @@ export default function OrganizationPage() {
             {isAdmin() && " اضغط على أي قسم لإدارة دوره (تخطيط / إشراف)."}
           </p>
         </div>
-        {isAdmin() && syncMutation.isPending && (
-          <span className="inline-flex items-center text-sm text-gray-500">
-            <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
-            جارٍ المزامنة...
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {isAdmin() && syncMutation.isPending && (
+            <span className="inline-flex items-center text-sm text-gray-500">
+              <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
+              جارٍ المزامنة...
+            </span>
+          )}
+          {isAdmin() && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingsOpen(true)}
+              title="إعدادات أنواع الوحدات"
+            >
+              <Settings className="w-4 h-4 ml-1" />
+              إعدادات الأنواع
+            </Button>
+          )}
+        </div>
       </div>
 
       {isAdmin() && (syncReport || syncError) && !syncMutation.isPending && (
@@ -327,6 +343,11 @@ export default function OrganizationPage() {
         assignments={assignments}
         tree={tree ?? []}
         onClose={() => setSelectedQism(null)}
+      />
+
+      <UnitTypeSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

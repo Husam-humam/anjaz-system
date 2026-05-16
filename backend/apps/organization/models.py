@@ -264,3 +264,60 @@ class ViewScope(models.Model):
 
     def __str__(self):
         return f'ViewScope({self.user.full_name})'
+
+
+# ═══════════════════════════════════════════════════════════════
+# تطابق أنواع الوحدات بين النظام الخارجي و نظام أنجز
+# ═══════════════════════════════════════════════════════════════
+
+class ExternalUnitTypeMapping(models.Model):
+    """
+    يربط أسماء أنواع الوحدات الواردة من النظام الخارجي بأحد الأنواع الثلاثة
+    في «أنجز» (دائرة / مديرية / قسم)، أو يُعلِّمها كـ «تجاهل».
+
+    التدفّق المتوقّع:
+    1. عند مزامنة الهيكل التنظيمي، نجلب قائمة `unit_types` من النظام الخارجي.
+    2. نُنشئ سطراً لكل نوع جديد بـ `treat_as=NULL` (يعني: «لم يُقرَّر بعد»).
+    3. يفتح الأدمن صفحة الإعدادات ويُحدّد القرار.
+    4. أثناء المزامنة الفعلية للوحدات، نستخدم هذا الجدول بدل خريطة مُجمَّدة.
+       - `treat_as` يساوي أحد الـ 3 أنواع → الوحدة تُستورَد بذلك النوع
+       - `treat_as='ignore'` → الوحدة تُتجاهَل تماماً
+       - `treat_as=NULL` → الوحدة تُتجاهَل مع عدّ skipped_unknown_type
+    """
+
+    class TreatAs(models.TextChoices):
+        DAIRA = 'daira', 'دائرة'
+        MUDIRIYA = 'mudiriya', 'مديرية'
+        QISM = 'qism', 'قسم'
+        IGNORE = 'ignore', 'تجاهل'
+
+    external_type_name = models.CharField(
+        max_length=100, unique=True, db_index=True,
+        verbose_name='اسم نوع الوحدة في النظام الخارجي',
+        help_text='كما يُرجعه `unit_type_name` من /reference/unit-types/',
+    )
+    external_type_id = models.PositiveIntegerField(
+        null=True, blank=True,
+        verbose_name='المعرّف في النظام الخارجي',
+        help_text='اختياري — للتتبّع فقط، لا يُستخدم في الربط',
+    )
+    treat_as = models.CharField(
+        max_length=20,
+        choices=TreatAs.choices,
+        null=True, blank=True,
+        verbose_name='يُعامَل كـ',
+        help_text='اتركه فارغاً مؤقتاً حتى يُقرّر الأدمن. القيم: daira / mudiriya / qism / ignore',
+    )
+    notes = models.TextField(blank=True, default='', verbose_name='ملاحظات')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإنشاء')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='تاريخ التحديث')
+
+    class Meta:
+        db_table = 'external_unit_type_mappings'
+        verbose_name = 'تطابق نوع وحدة خارجي'
+        verbose_name_plural = 'تطابقات أنواع الوحدات الخارجيّة'
+        ordering = ['external_type_name']
+
+    def __str__(self):
+        decision = self.get_treat_as_display() if self.treat_as else 'لم يُحدَّد'
+        return f'{self.external_type_name} → {decision}'

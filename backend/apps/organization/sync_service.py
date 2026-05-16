@@ -26,22 +26,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from .integrations import ExternalOrgClient, ExternalOrgError
-from .models import OrganizationUnit, UnitType
+from .models import ExternalUnitTypeMapping, OrganizationUnit, UnitType
 
 logger = logging.getLogger(__name__)
 
 
-# خريطة أنواع الوحدات: external unit_type_name (بالعربيّة) → unit_type في «أنجز»
-#
-# ملاحظة معماريّة: الأسماء على اليسار هي حرفياً ما يُرجعه النظام الخارجي في
-# `unit_type_name`. أنواع «أنجز» على اليمين أقلّ تعبيراً (٣ مستويات: daira/
-# mudiriya/qism) لكن سنُلغي هذه التفرقة كلياً في Phase F بعد تبنّي نموذج
-# التخصيصات الصريحة. حتى ذلك الحين، نُسقط الأنواع الإضافيّة على الأقرب:
-# - «شعبة» (مستوى أدنى من قسم) → qism (تُعامَل كوحدة تُرسِل منجزات)
-# - «وحدة» (نوع جنريك في النظام الخارجي) → qism (تخمين معقول للاستخدام)
-#
-# يمكن للأدمن تعديل النوع يدوياً بعد المزامنة إن أراد.
-DEFAULT_UNIT_TYPE_MAP: dict[str, str] = {
+# أسماء افتراضيّة لأنواع شائعة — تُستخدم فقط لاقتراح `treat_as` عند إنشاء
+# سطر جديد في `ExternalUnitTypeMapping`. الأدمن يستطيع تغييره من الواجهة.
+# المصدر النهائي للحقيقة هو جدول `ExternalUnitTypeMapping` نفسه.
+DEFAULT_TYPE_SUGGESTIONS: dict[str, str] = {
     'دائرة': UnitType.DAIRA,
     'مديرية': UnitType.MUDIRIYA,
     'قسم': UnitType.QISM,
@@ -95,10 +88,67 @@ class OrganizationSyncService:
     def __init__(
         self,
         client: ExternalOrgClient | None = None,
-        unit_type_map: dict[str, str] | None = None,
+        unit_type_map: dict[str, str | None] | None = None,
     ):
         self.client = client or ExternalOrgClient()
-        self.unit_type_map = unit_type_map or DEFAULT_UNIT_TYPE_MAP
+        # نُحمِّل الـ mapping من DB عند البَدء — يضمن أحدث القرارات من الأدمن.
+        # المُختبَرون يستطيعون تمرير override يدوي.
+        self.unit_type_map: dict[str, str | None] = (
+            unit_type_map
+            if unit_type_map is not None
+            else self._load_unit_type_map_from_db()
+        )
+
+    @staticmethod
+    def _load_unit_type_map_from_db() -> dict[str, str | None]:
+        """
+        يبني خريطة `external_type_name → treat_as` من جدول `ExternalUnitTypeMapping`.
+        `treat_as=None` يعني «لم يُحدَّد بعد» — تلك الأنواع تُتجاهَل + تُعَدّ في
+        skipped_unknown_type.
+        """
+        return dict(
+            ExternalUnitTypeMapping.objects.values_list(
+                'external_type_name', 'treat_as',
+            )
+        )
+
+    # ─── مزامنة جدول أنواع الوحدات ─────────────
+
+    def refresh_unit_type_mappings(self) -> dict[str, int]:
+        """
+        يجلب أنواع الوحدات من النظام الخارجي ويُنشئ سطراً جديداً في
+        `ExternalUnitTypeMapping` لكل نوع غير معروف (مع `treat_as=NULL` أو
+        اقتراح من DEFAULT_TYPE_SUGGESTIONS).
+
+        يُرجع تقرير: {'created': N, 'existing': M}
+        """
+        self.client.assert_configured()
+        unit_types = self.client.get_unit_types()
+        created = 0
+        existing = 0
+
+        for ut in unit_types:
+            name = (ut.get('name') or '').strip()
+            if not name:
+                continue
+            suggested = DEFAULT_TYPE_SUGGESTIONS.get(name)
+            obj, was_created = ExternalUnitTypeMapping.objects.get_or_create(
+                external_type_name=name,
+                defaults={
+                    'external_type_id': ut.get('id'),
+                    'treat_as': suggested,  # NULL إن لم يُعرَف
+                },
+            )
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+                # نُحدِّث الـ external_type_id إن كان مفقوداً
+                if obj.external_type_id is None and ut.get('id') is not None:
+                    obj.external_type_id = ut.get('id')
+                    obj.save(update_fields=['external_type_id'])
+
+        return {'created': created, 'existing': existing}
 
     # ─── المدخل الرئيسي ─────────────────────────
 
@@ -110,6 +160,19 @@ class OrganizationSyncService:
         """
         report = SyncReport(dry_run=dry_run, started_at=timezone.now())
         self.client.assert_configured()
+
+        # 0) ضمان وجود سطر mapping لكل نوع خارجي + إعادة تحميل الخريطة
+        #    (في dry_run لا نكتب، فنكتفي بالخريطة المُحمَّلة في __init__).
+        if not dry_run:
+            try:
+                self.refresh_unit_type_mappings()
+                self.unit_type_map = self._load_unit_type_map_from_db()
+            except ExternalOrgError as exc:
+                report.errors.append(
+                    f'فشل جلب أنواع الوحدات من النظام الخارجي: {exc}'
+                )
+                report.finished_at = timezone.now()
+                return report
 
         # 1) جلب البيانات الخام
         try:
@@ -230,10 +293,12 @@ class OrganizationSyncService:
         }
 
         for ext_id, ext_data in external_units.items():
-            mapped_type = self.unit_type_map.get(ext_data['unit_type_name'])
+            mapped_type = self._resolve_treat_as(ext_data['unit_type_name'])
             if mapped_type is None:
+                # treat_as = NULL (لم يُقرَّر) أو 'ignore' (قرار صريح بالتجاهل)
+                # كلاهما يُتجاهَل أثناء المزامنة. نُفرّق في الـ log فقط.
                 logger.warning(
-                    'تجاهل وحدة بنوع غير معروف: external_id=%s, type=%r',
+                    'تجاهل وحدة: external_id=%s, type=%r (treat_as غير معرَّف أو ignore)',
                     ext_id, ext_data['unit_type_name'],
                 )
                 report.skipped_unknown_type += 1
@@ -286,6 +351,21 @@ class OrganizationSyncService:
         ).exclude(external_id__in=active_ids)
         report.deactivated = disappeared.update(is_active=False)
 
+    def _resolve_treat_as(self, type_name: str | None) -> str | None:
+        """
+        يُرجع unit_type المحلي الصحيح لاسم نوع خارجي، أو None لو وجب التجاهل.
+
+        - النوع غير موجود في الخريطة → None (لم يُقرَّر بعد)
+        - treat_as == 'ignore' → None (تجاهل صريح)
+        - treat_as ∈ {daira, mudiriya, qism} → القيمة نفسها
+        """
+        if not type_name:
+            return None
+        treat_as = self.unit_type_map.get(type_name)
+        if treat_as is None or treat_as == 'ignore':
+            return None
+        return treat_as
+
     def _simulate_sync(
         self,
         external_units: dict[int, dict[str, Any]],
@@ -297,7 +377,7 @@ class OrganizationSyncService:
             .values_list('external_id', flat=True)
         )
         for ext_id, ext_data in external_units.items():
-            mapped_type = self.unit_type_map.get(ext_data['unit_type_name'])
+            mapped_type = self._resolve_treat_as(ext_data['unit_type_name'])
             if mapped_type is None:
                 report.skipped_unknown_type += 1
                 continue
