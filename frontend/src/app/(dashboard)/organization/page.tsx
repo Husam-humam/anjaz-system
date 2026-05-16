@@ -400,31 +400,34 @@ function QismAssignmentDialog({
 
   return (
     <Dialog open={!!qism} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{qism.name}</DialogTitle>
-          <DialogDescription>
-            {qism.parent_name ? `ضمن: ${qism.parent_name} — ` : ""}
-            رمز: <span className="font-mono">{qism.code}</span>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader className="pl-8">
+          <DialogTitle className="text-xl">{qism.name}</DialogTitle>
+          <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {qism.parent_name && (
+              <span className="text-gray-600">ضمن: {qism.parent_name}</span>
+            )}
+            <span className="text-gray-400">•</span>
+            <span>
+              رمز: <span className="font-mono text-gray-700">{qism.code}</span>
+            </span>
           </DialogDescription>
         </DialogHeader>
 
         {actionError && (
           <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{actionError}</p>
+            <p className="text-sm text-red-700 break-words">{actionError}</p>
           </div>
         )}
 
         {/* === القسم غير مُسنَد === */}
         {role === "unassigned" && (
-          <div className="space-y-4 py-2">
-            <div
-              className={`rounded-lg border p-3 ${QISM_ASSIGNMENT_COLORS.unassigned} border-current/20`}
-            >
-              <p className="text-sm">
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm text-gray-700 leading-relaxed">
                 هذا القسم لم يُسنَد بعد. يمكنه أن يعمل كقسم تخطيط (يُشرف على أقسام
-                أخرى) أو يبقى عاديّاً ليُشرَف عليه من قبل قسم تخطيط آخر (من
+                أخرى) أو يبقى عاديّاً ليُشرَف عليه من قِبَل قسم تخطيط آخر (من
                 نافذة ذلك القسم).
               </p>
             </div>
@@ -442,48 +445,53 @@ function QismAssignmentDialog({
 
         {/* === القسم تحت إشراف قسم تخطيط آخر === */}
         {role === "supervised" && supervisor && (
-          <div className="py-2 space-y-2">
-            <div
-              className={`rounded-lg border p-3 ${QISM_ASSIGNMENT_COLORS.supervised} border-current/20`}
-            >
-              <p className="text-sm">
+          <div className="space-y-3">
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+              <p className="text-sm text-teal-900 mb-2">
                 هذا القسم <strong>مُشرَف عليه</strong> من قِبَل قسم التخطيط:
               </p>
-              <p className="text-base font-bold mt-2">
+              <p className="text-base font-bold text-teal-900">
                 {supervisor.planning_unit_name}
               </p>
-              <p className="text-xs font-mono text-gray-500">
+              <p className="text-xs font-mono text-teal-700/70 mt-0.5">
                 {supervisor.planning_unit_code}
               </p>
             </div>
-            <p className="text-xs text-gray-500">
-              لتعديل أو إزالة هذا الإشراف، افتح نافذة قسم التخطيط
-              «{supervisor.planning_unit_name}».
+            <p className="text-xs text-gray-500 px-1">
+              لتعديل هذا الإشراف أو إزالته، افتح نافذة قسم التخطيط «{supervisor.planning_unit_name}» من الشجرة.
             </p>
           </div>
         )}
 
         {/* === القسم هو قسم تخطيط === */}
         {role === "planning" && planningAssignment && (
-          <div className="space-y-4 py-2">
-            <div
-              className={`rounded-lg border p-3 ${QISM_ASSIGNMENT_COLORS.planning} border-current/20`}
-            >
-              <p className="text-sm">
-                هذا القسم يعمل كـ <strong>قسم تخطيط</strong>. يُشرف على{" "}
-                {planningAssignment.supervised_units.length} قسماً.
-              </p>
+          <div className="space-y-5">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-amber-900">
+                  يعمل كـ <strong>قسم تخطيط</strong>
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  يُشرف على {planningAssignment.supervised_units.length} قسماً
+                </p>
+              </div>
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+                {planningAssignment.supervised_units.length}
+              </span>
             </div>
 
+            {/* صندوق إضافة قسم */}
             <div className="space-y-2">
-              <Label>إضافة قسم تحت إشرافه</Label>
-              <div className="flex gap-2">
+              <Label className="text-sm font-semibold">
+                إضافة قسم تحت إشرافه
+              </Label>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <select
                   value={unitToAdd}
                   onChange={(e) =>
                     setUnitToAdd(e.target.value ? Number(e.target.value) : "")
                   }
-                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
+                  className="flex-1 min-w-0 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-right truncate"
                   dir="rtl"
                   disabled={availableForSupervision.length === 0}
                 >
@@ -507,6 +515,7 @@ function QismAssignmentDialog({
                     });
                   }}
                   disabled={!unitToAdd || addSupervisedMutation.isPending}
+                  className="sm:w-auto w-full"
                 >
                   <Plus className="w-4 h-4 ml-1" />
                   إضافة
@@ -514,23 +523,30 @@ function QismAssignmentDialog({
               </div>
             </div>
 
+            {/* قائمة الأقسام المُشرَف عليها */}
             <div className="space-y-2">
-              <Label>الأقسام المُشرَف عليها</Label>
-              <div className="border rounded-lg max-h-60 overflow-y-auto">
+              <Label className="text-sm font-semibold">
+                الأقسام المُشرَف عليها
+              </Label>
+              <div className="border rounded-lg overflow-hidden bg-white">
                 {planningAssignment.supervised_units.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">
-                    لا توجد أقسام بعد
-                  </p>
+                  <div className="text-center py-8 px-4">
+                    <p className="text-sm text-gray-400">
+                      لم تتم إضافة أي قسم بعد. استخدم القائمة أعلاه لإضافة الأقسام.
+                    </p>
+                  </div>
                 ) : (
-                  <ul className="divide-y">
+                  <ul className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
                     {planningAssignment.supervised_units.map((s) => (
                       <li
                         key={s.id}
-                        className="flex items-center justify-between px-4 py-2 hover:bg-gray-50"
+                        className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors"
                       >
-                        <div>
-                          <p className="font-medium text-sm">{s.unit_name}</p>
-                          <p className="text-xs text-gray-400 font-mono">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm text-gray-900 truncate">
+                            {s.unit_name}
+                          </p>
+                          <p className="text-xs text-gray-400 font-mono truncate">
                             {s.unit_code}
                           </p>
                         </div>
@@ -544,7 +560,8 @@ function QismAssignmentDialog({
                             })
                           }
                           disabled={removeSupervisedMutation.isPending}
-                          className="text-red-500 hover:text-red-700"
+                          className="h-8 w-8 flex-shrink-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                          title="إزالة من الإشراف"
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -555,14 +572,15 @@ function QismAssignmentDialog({
               </div>
             </div>
 
-            <div className="pt-2 border-t">
+            {/* زر إلغاء دور التخطيط */}
+            <div className="pt-3 border-t border-gray-200">
               <Button
                 variant="ghost"
-                className="text-red-600 hover:text-red-700 w-full"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full justify-center"
                 onClick={() => {
                   if (
                     confirm(
-                      `إلغاء دور التخطيط لـ ${qism.name}؟ سيُحذف التخصيص بكل الأقسام المُشرَف عليها.`,
+                      `إلغاء دور التخطيط لـ ${qism.name}؟ سيُحذف التخصيص وكل الأقسام المُشرَف عليها.`,
                     )
                   ) {
                     deleteAssignmentMutation.mutate(planningAssignment.id);
@@ -577,7 +595,7 @@ function QismAssignmentDialog({
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="pt-2 border-t">
           <Button variant="outline" onClick={onClose}>
             إغلاق
           </Button>
