@@ -177,10 +177,11 @@ class TargetService:
         - scope_unit.unit_type = 'qism' → معرّف هذا القسم فقط
         - scope_unit.unit_type = 'mudiriya' / 'daira' → كل الأقسام التابعة (عبر MPTT)
         """
+        # الأقسام «العاديّة» الآن = أقسام مُشرَف عليها (لها SupervisedUnit)
         base_qs = OrganizationUnit.objects.filter(
             unit_type=UnitType.QISM,
-            qism_role='regular',
             is_active=True,
+            supervisor_link__isnull=False,
         )
 
         if scope_unit is None:
@@ -194,8 +195,8 @@ class TargetService:
         fresh_unit = OrganizationUnit.objects.get(pk=scope_unit.pk)
         descendants = fresh_unit.get_descendants(include_self=False).filter(
             unit_type=UnitType.QISM,
-            qism_role='regular',
             is_active=True,
+            supervisor_link__isnull=False,
         )
         return list(descendants.values_list('id', flat=True))
 
@@ -448,9 +449,9 @@ class TargetService:
         """
         from apps.organization.models import UnitType
 
-        # أقسام — ورقة
+        # أقسام — ورقة (يجب أن تكون مُشرَفاً عليها — لها supervisor_link)
         if unit.unit_type == UnitType.QISM:
-            if unit.qism_role != 'regular' or not unit.is_active:
+            if not unit.is_active:
                 return None
             if unit.id not in all_scope_qism_ids:
                 return None
@@ -493,8 +494,8 @@ class TargetService:
         descendant_qism_ids = list(
             unit.get_descendants().filter(
                 unit_type=UnitType.QISM,
-                qism_role='regular',
                 is_active=True,
+                supervisor_link__isnull=False,
             ).values_list('id', flat=True)
         )
         # استبعاد الأقسام غير الموجودة في النطاق

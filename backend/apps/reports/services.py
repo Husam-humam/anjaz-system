@@ -256,8 +256,10 @@ class ReportService:
     def get_compliance_report(year, unit_id=None):
         """تقرير الامتثال"""
         periods = WeeklyPeriod.objects.filter(year=year).order_by('week_number')
+        # الأقسام المُشرَف عليها فقط (الأقسام التي تُقدِّم منجزات)
         qisms = OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True
+            unit_type='qism', is_active=True,
+            supervisor_link__isnull=False,
         )
         if unit_id:
             unit = OrganizationUnit.objects.get(pk=unit_id)

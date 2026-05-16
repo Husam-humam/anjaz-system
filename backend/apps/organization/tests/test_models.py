@@ -56,12 +56,6 @@ class TestOrganizationUnitValidation:
         qism = QismFactory(name="قسم التوظيف", parent=mudiriya)
         assert qism.get_full_path() == "دائرة الشؤون / مديرية الموارد / قسم التوظيف"
 
-    def test_qism_role_forced_to_regular_for_non_qism(self):
-        """دور القسم يُعاد تعيينه إلى 'عادي' لغير الأقسام"""
-        daira = DairaFactory.build(qism_role="planning")
-        daira.full_clean()
-        assert daira.qism_role == "regular"
-
     def test_qism_must_have_parent(self):
         """القسم يجب أن يتبع مديرية أو دائرة"""
         qism = QismFactory.build(parent=None)

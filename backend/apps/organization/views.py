@@ -11,7 +11,7 @@ from .services import OrganizationService
 class OrganizationUnitViewSet(viewsets.ModelViewSet):
     serializer_class = OrganizationUnitSerializer
     permission_classes = [IsStatisticsAdminOrReadOnly]
-    filterset_fields = ['unit_type', 'qism_role', 'parent', 'is_active']
+    filterset_fields = ['unit_type', 'parent', 'is_active']
     search_fields = ['name', 'code']
 
     def get_queryset(self):

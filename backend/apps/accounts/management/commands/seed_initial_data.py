@@ -38,7 +38,7 @@ class Command(BaseCommand):
             defaults={
                 'name': 'قسم الإحصاء',
                 'unit_type': 'qism',
-                'qism_role': 'statistics',
+
             }
         )
         if created:
@@ -80,7 +80,7 @@ class Command(BaseCommand):
             defaults={
                 'name': 'دائرة الشؤون الإدارية',
                 'unit_type': 'daira',
-                'qism_role': 'regular',
+
             }
         )
 
@@ -90,7 +90,7 @@ class Command(BaseCommand):
             defaults={
                 'name': 'مديرية الموارد البشرية',
                 'unit_type': 'mudiriya',
-                'qism_role': 'regular',
+
                 'parent': daira_admin,
             }
         )
@@ -107,7 +107,6 @@ class Command(BaseCommand):
                 defaults={
                     'name': name,
                     'unit_type': 'qism',
-                    'qism_role': role,
                     'parent': mudiriya_hr,
                 }
             )
@@ -119,7 +118,7 @@ class Command(BaseCommand):
             defaults={
                 'name': 'مديرية تقنية المعلومات',
                 'unit_type': 'mudiriya',
-                'qism_role': 'regular',
+
             }
         )
 
@@ -134,7 +133,6 @@ class Command(BaseCommand):
                 defaults={
                     'name': name,
                     'unit_type': 'qism',
-                    'qism_role': role,
                     'parent': mudiriya_it,
                 }
             )

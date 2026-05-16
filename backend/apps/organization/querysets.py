@@ -17,13 +17,17 @@ class OrganizationUnitQuerySet(models.QuerySet):
         return self.filter(unit_type='qism')
 
     def regular_qisms(self):
-        return self.filter(unit_type='qism', qism_role='regular')
+        """
+        الأقسام «العاديّة» — أي قسم ليس قسم تخطيط.
+        قسم التخطيط = أي وحدة لها PlanningAssignment.
+        """
+        return self.filter(unit_type='qism').exclude(
+            planning_assignment__isnull=False
+        )
 
     def planning_qisms(self):
-        return self.filter(unit_type='qism', qism_role='planning')
-
-    def statistics_qisms(self):
-        return self.filter(unit_type='qism', qism_role='statistics')
+        """أقسام التخطيط — أي وحدة لها PlanningAssignment."""
+        return self.filter(planning_assignment__isnull=False)
 
     def root_units(self):
         return self.filter(parent__isnull=True)

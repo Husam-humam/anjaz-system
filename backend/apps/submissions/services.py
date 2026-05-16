@@ -105,11 +105,12 @@ class WeeklyPeriodService:
             ],
         ).update(status=WeeklySubmission.Status.LATE)
 
-        # الحصول على الأقسام العادية النشطة التي لم ترسل منجزاتها أبداً
+        # الحصول على الأقسام النشطة التي لم تُرسل منجزاتها (المُشرَف عليها فقط)
+        # بعد Phase F: "قسم عادي" = قسم له SupervisedUnit
         active_regular_qisms = OrganizationUnit.objects.filter(
             unit_type=UnitType.QISM,
-            qism_role='regular',
             is_active=True,
+            supervisor_link__isnull=False,  # له مُشرف = قسم مُسنَد للتقديم
         )
 
         any_submission_qism_ids = set(
@@ -1179,11 +1180,11 @@ class AggregationService:
                 list(answers), indicator.accumulation_type
             )
 
-        # للمديرية أو الدائرة: تجميع قيم الأقسام التابعة
+        # للمديرية أو الدائرة: تجميع قيم الأقسام المُشرَف عليها التابعة
         child_qisms = OrganizationUnit.objects.filter(
             unit_type=UnitType.QISM,
-            qism_role='regular',
             is_active=True,
+            supervisor_link__isnull=False,
         )
 
         if unit.unit_type == UnitType.MUDIRIYA:
@@ -1322,51 +1323,28 @@ def _planning_section_scope_qism_ids(user):
     (اعتماد/رفض/تعديل المنجزات).
 
     دلالات القيمة المُرجَعة:
-    - `None` → نطاق كامل (statistics_admin، أو حالات legacy للمخطّط المركزي).
-    - `set()` فارغة → لا صلاحيّة (viewer، أو planner بدون assignment).
+    - `set()` فارغة → لا صلاحيّة (viewer، أو planner بدون PlanningAssignment).
     - `set({1,2,3})` → معرّفات الأقسام تحت إشرافه.
 
-    منطق التحديد (مرتّب بالأولويّة):
-    1. **النموذج الجديد (Phase C+)**: قسم التخطيط له `PlanningAssignment` →
-       النطاق = `SupervisedUnit.unit_id`s.
-    2. **fallback لـ MPTT (legacy)**: إن لم يوجد `PlanningAssignment` (لم تُهاجَر
-       البيانات بعد في Phase E)، نُعيد سلوك الـ MPTT القديم لمنع كسر النظام
-       أثناء فترة الانتقال.
-
-    سيُحذف الـ fallback في Phase F بعد تأكّد المهاجرة.
+    المنطق:
+    - planner → SupervisedUnit المُسنَدة عبر PlanningAssignment للوحدة
+    - viewer → set() دائماً
+    - section_manager / statistics_admin → غير مُتوقَّع استدعاؤها من هؤلاء
+      (لكن نُعيد set() آمن للتعامل)
     """
     role = getattr(user, 'role', None)
-
-    # دور viewer لا يدير شيئاً
     if role == 'viewer':
         return set()
-
-    if not user.unit:
+    if not user.unit_id:
         return set()
 
-    # ── النموذج الجديد ──
     from apps.organization.models import PlanningAssignment
     try:
         assignment = PlanningAssignment.objects.get(planning_unit_id=user.unit_id)
-        return set(
-            assignment.supervised_units.values_list('unit_id', flat=True)
-        )
     except PlanningAssignment.DoesNotExist:
-        pass
+        return set()
 
-    # ── fallback (legacy MPTT) ──
-    parent_id = user.unit.parent_id
-    if parent_id is None:
-        # قسم تخطيط مركزي legacy — صلاحية على كل الأقسام
-        return None
-
-    parent = OrganizationUnit.objects.get(pk=parent_id)
-    descendant_ids = set(
-        parent.get_descendants(include_self=False)
-        .filter(unit_type=UnitType.QISM, qism_role='regular', is_active=True)
-        .values_list('id', flat=True)
-    )
-    return descendant_ids
+    return set(assignment.supervised_units.values_list('unit_id', flat=True))
 
 
 def _user_view_scope_qism_ids(user):
@@ -1387,12 +1365,8 @@ def _user_view_scope_qism_ids(user):
     if role == 'section_manager':
         return {user.unit_id} if user.unit_id else set()
 
-    # planner أو viewer — نبدأ بنطاق الإدارة (إن وُجد) ونُضيف ViewScope
+    # planner أو viewer — نبدأ بنطاق الإدارة ونُضيف ViewScope
     manage_scope = _planning_section_scope_qism_ids(user)
-    if manage_scope is None:
-        # legacy central planner — نطاق كامل
-        return None
-
     visible = set(manage_scope)
 
     # نُضيف وحدات ViewScope إن وُجدت

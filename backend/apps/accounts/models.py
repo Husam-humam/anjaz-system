@@ -81,18 +81,20 @@ class User(AbstractUser):
 
     def clean(self):
         """
-        التحقق من صحة العلاقة بين دور المستخدم ونوع الوحدة التنظيمية.
+        التحقق من صحة العلاقة بين دور المستخدم والوحدة التنظيميّة.
 
         قواعد الوحدة بحسب الدور:
-        - section_manager: إلزامية (نطاقه = وحدته)
-        - planning_section: إلزامية (وحدته هي قسم التخطيط، نطاقه يأتي من
-          PlanningAssignment للوحدة)
+        - section_manager: إلزامية (نطاقه = وحدته فقط)
+        - planning_section: إلزامية (وحدته = قسم التخطيط، نطاقه يأتي من
+          PlanningAssignment.supervised_units)
         - statistics_admin: اختيارية (نطاق كامل بغضّ النظر عن الوحدة)
-        - viewer: اختيارية (نطاقه يأتي من ViewScope.viewable_units فقط)
+        - viewer: اختيارية (نطاقه = ViewScope.viewable_units)
 
-        ملاحظة: بعد Phase F (إزالة `qism_role`)، لم يَعُد هناك تطابق إلزامي
-        بين الدور و«نوع القسم». التخصيصات الصريحة (PlanningAssignment)
-        تحلّ مكان هذه القواعد.
+        ملاحظة: مفهوم "نوع القسم" (qism_role) أُلغي. التمييز بين قسم
+        تخطيط / عادي / إحصاء يأتي الآن من التخصيصات الصريحة:
+        - PlanningAssignment يُعرّف من هو قسم تخطيط
+        - SupervisedUnit يُعرّف من هو قسم عادي مُشرَف عليه
+        - statistics_admin role لا يحتاج وحدة خاصّة
         """
         super().clean()
 
@@ -105,32 +107,8 @@ class User(AbstractUser):
                 raise ValidationError({
                     'unit': 'قسم التخطيط يجب أن يرتبط بوحدة تنظيميّة.',
                 })
+            # statistics_admin و viewer: الوحدة اختياريّة
             return
 
-        # الوحدة موجودة. التحقّقات السابقة على `qism_role` تُحفَظ مؤقّتاً
-        # للحفاظ على التوافق حتى Phase F. سيتم استبدالها بـ
-        # PlanningAssignment validation في Phase D.
-        unit = self.unit
-        role_to_qism_role = {
-            UserRole.STATISTICS_ADMIN: 'statistics',
-            UserRole.PLANNING_SECTION: 'planning',
-            UserRole.SECTION_MANAGER: 'regular',
-        }
-        role_error_messages = {
-            UserRole.STATISTICS_ADMIN: 'مدير قسم الإحصاء يجب أن يرتبط بقسم من نوع "إحصاء".',
-            UserRole.PLANNING_SECTION: 'قسم التخطيط يجب أن يرتبط بقسم من نوع "تخطيط".',
-            UserRole.SECTION_MANAGER: 'مدير القسم يجب أن يرتبط بقسم من نوع "عادي".',
-        }
-        expected_qism_role = role_to_qism_role.get(self.role)
-        if expected_qism_role is None:
-            # viewer أو أي دور لا يفرض نوع قسم
-            return
-
-        if unit.unit_type != 'qism':
-            raise ValidationError({
-                'unit': 'يجب أن تكون الوحدة التنظيمية من نوع "قسم".',
-            })
-        if unit.qism_role != expected_qism_role:
-            raise ValidationError({
-                'unit': role_error_messages[self.role],
-            })
+        # الوحدة موجودة. لا قيود إضافيّة — التخصيصات الصريحة تتولّى التحقّق
+        # الفعلي من «من هو قسم تخطيط» عند الإجراءات الفعليّة.

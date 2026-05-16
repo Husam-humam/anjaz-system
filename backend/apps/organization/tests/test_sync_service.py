@@ -114,23 +114,25 @@ class TestSyncServiceUpdate:
         assert existing.name == 'اسم جديد'
         assert existing.code == 'NEW'
 
-    def test_update_preserves_qism_role(self):
-        """qism_role محلي ولا تمسّه المزامنة."""
+    def test_update_preserves_external_synced_at(self):
+        """external_synced_at يُحدَّث في كل مزامنة."""
         existing = OrganizationUnit.objects.create(
-            external_id=60, name='قسم تخطيط', code='P1',
-            unit_type=UnitType.QISM, parent=None, qism_role='planning',
+            external_id=60, name='قسم قديم', code='P1',
+            unit_type=UnitType.DAIRA, parent=None,
         )
+        old_synced = existing.external_synced_at
 
-        tree = [{'id': 60, 'name': 'قسم تخطيط محدَّث', 'children': None}]
+        tree = [{'id': 60, 'name': 'قسم محدَّث', 'children': None}]
         flat = build_flat([
-            {'id': 60, 'name': 'قسم تخطيط محدَّث', 'code': 'P1',
-             'unit_type_name': 'قسم', 'is_active': True}
+            {'id': 60, 'name': 'قسم محدَّث', 'code': 'P1',
+             'unit_type_name': 'دائرة', 'is_active': True}
         ])
         service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
         service.sync()
 
         existing.refresh_from_db()
-        assert existing.qism_role == 'planning'  # لم يتغيّر
+        assert existing.external_synced_at != old_synced
+        assert existing.name == 'قسم محدَّث'
 
     def test_update_no_change_returns_no_count(self):
         OrganizationUnit.objects.create(

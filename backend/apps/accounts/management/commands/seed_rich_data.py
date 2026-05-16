@@ -232,7 +232,7 @@ class Command(BaseCommand):
             defaults={
                 'name': 'قسم الإحصاء',
                 'unit_type': 'qism',
-                'qism_role': 'statistics',
+
             }
         )
         if created:
@@ -244,7 +244,7 @@ class Command(BaseCommand):
                 defaults={
                     'name': daira_data['name'],
                     'unit_type': 'daira',
-                    'qism_role': 'regular',
+
                 },
             )
             if created:
@@ -257,7 +257,7 @@ class Command(BaseCommand):
                     defaults={
                         'name': mud_data['name'],
                         'unit_type': 'mudiriya',
-                        'qism_role': 'regular',
+
                         'parent': daira,
                     },
                 )
@@ -266,12 +266,13 @@ class Command(BaseCommand):
                     self.stdout.write(f'    + مديرية: {mudiriya.name}')
 
                 for q_code, q_name, q_role in mud_data.get('qisms', []):
+                    # ملاحظة: q_role لم يَعُد محفوظاً على الوحدة. التخصيصات
+                    # (planning/regular) تُنشأ منفصلاً عبر PlanningAssignment.
                     qism, created = OrganizationUnit.objects.get_or_create(
                         code=q_code,
                         defaults={
                             'name': q_name,
                             'unit_type': 'qism',
-                            'qism_role': q_role,
                             'parent': mudiriya,
                         },
                     )
@@ -304,14 +305,12 @@ class Command(BaseCommand):
     def _ensure_admin_user(self):
         admin = User.objects.filter(role=UserRole.STATISTICS_ADMIN).first()
         if not admin:
-            stat_qism = OrganizationUnit.objects.filter(
-                qism_role='statistics'
-            ).first()
+            # admin role لا يحتاج وحدة بعد Phase F
             admin = User(
                 username='admin',
                 full_name='مدير النظام',
                 role='statistics_admin',
-                unit=stat_qism,
+                unit=None,
                 is_staff=True,
                 is_superuser=True,
             )
@@ -325,7 +324,8 @@ class Command(BaseCommand):
         """إنشاء قالب معتمد لكل قسم عادي"""
         self.stdout.write('[5/7] قوالب الاستمارات...')
         regular_qisms = OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True,
+            unit_type='qism', is_active=True,
+            supervisor_link__isnull=False,
         )
         created_count = 0
 
@@ -449,7 +449,8 @@ class Command(BaseCommand):
         """إنشاء منجزات واقعية للأقسام في كل فترة"""
         self.stdout.write('[7/7] المنجزات والإجابات...')
         regular_qisms = OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True,
+            unit_type='qism', is_active=True,
+            supervisor_link__isnull=False,
         )
 
         created_submissions = 0
@@ -654,7 +655,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             f'  الأقسام العادية: '
-            f'{OrganizationUnit.objects.filter(unit_type="qism", qism_role="regular").count()}'
+            f'{OrganizationUnit.objects.filter(unit_type="qism", supervisor_link__isnull=False).count()}'
         )
         self.stdout.write(
             f'  المؤشرات: {Indicator.objects.filter(is_active=True).count()}'

@@ -24,9 +24,12 @@ class FormTemplateService:
         qism = data.get('qism')
 
         # التحقق من أن القسم هو قسم عادي
-        if qism.unit_type != 'qism' or qism.qism_role != 'regular':
+        # القالب يجب أن يكون لقسم مُسنَد للتقديم (له SupervisedUnit، ليس قسم تخطيط)
+        is_planning = hasattr(qism, 'planning_assignment')
+        is_supervised = hasattr(qism, 'supervisor_link')
+        if qism.unit_type != 'qism' or is_planning or not is_supervised:
             raise ValidationError({
-                'qism': 'يجب أن تكون الاستمارة مرتبطة بقسم عادي فقط'
+                'qism': 'يجب أن تكون الاستمارة مرتبطة بقسم مُسنَد للتقديم'
             })
 
         # التحقق من أن المنشئ (إن كان قسم تخطيط) ينطبق نطاقه على القسم المستهدف.

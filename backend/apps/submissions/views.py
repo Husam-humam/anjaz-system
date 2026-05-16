@@ -156,8 +156,10 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
         user = request.user
 
         # تحديد نطاق الأقسام حسب دور المستخدم (view scope: managed + ViewScope)
+        # الأقسام المُشرَف عليها فقط (لها supervisor_link)
         qisms_qs = OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True,
+            unit_type='qism', is_active=True,
+            supervisor_link__isnull=False,
         )
         if user.role != 'statistics_admin':
             from .services import _user_view_scope_qism_ids
@@ -292,11 +294,13 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                 )
 
         # حساب معرّفات الأقسام ضمن النطاق
+        # ملاحظة: "قسم قابل للتقديم" = قسم له SupervisedUnit (مُشرَف عليه)
         if scope_unit is None:
             # المؤسسة كاملة
             qism_ids = list(
                 OrganizationUnit.objects.filter(
-                    unit_type='qism', qism_role='regular', is_active=True,
+                    unit_type='qism', is_active=True,
+                    supervisor_link__isnull=False,
                 ).values_list('id', flat=True)
             )
             # لـ non-admin: قيّد بنطاق الرؤية
@@ -305,9 +309,10 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                 if scope_ids is not None:
                     qism_ids = [i for i in qism_ids if i in scope_ids]
         elif scope_unit.unit_type == 'qism':
-            if scope_unit.qism_role != 'regular':
+            # نقبل القسم إن كان مُشرَفاً عليه
+            if not hasattr(scope_unit, 'supervisor_link'):
                 return Response(
-                    {'error': True, 'message': 'الأقسام الخاصة غير مدعومة',
+                    {'error': True, 'message': 'هذا القسم غير مُسنَد للتقديم',
                      'code': 'VALIDATION_ERROR', 'details': {}},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -317,7 +322,8 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
             fresh_unit = OrganizationUnit.objects.get(pk=scope_unit.pk)
             qism_ids = list(
                 fresh_unit.get_descendants()
-                .filter(unit_type='qism', qism_role='regular', is_active=True)
+                .filter(unit_type='qism', is_active=True,
+                        supervisor_link__isnull=False)
                 .values_list('id', flat=True)
             )
 

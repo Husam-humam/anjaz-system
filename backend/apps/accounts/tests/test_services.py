@@ -63,27 +63,14 @@ class TestUserServiceCreateUser:
 
         assert user.pk is not None
         assert user.role == 'statistics_admin'
-        assert user.unit.qism_role == 'statistics'
+        # بعد Phase F: لا يوجد qism_role — admin role لا يحتاج قسم خاصّ
 
-    def test_create_user_invalid_role_unit_mismatch(self):
-        """التحقق من رفض إنشاء مستخدم بدور لا يتطابق مع نوع القسم"""
-        admin = StatisticsAdminFactory()
-        # قسم عادي — لا يصلح لمدير إحصاء
-        regular_qism = QismFactory()
+    def _skip_test_create_user_invalid_role_unit_mismatch(self):
+        """[ملغاة بعد Phase F] لا يوجد تطابق إلزامي بين الدور ونوع القسم."""
+        pass
 
-        data = {
-            'username': 'bad_admin',
-            'full_name': 'مدير خاطئ',
-            'role': 'statistics_admin',
-            'unit': regular_qism,
-            'password': 'securepass123',
-        }
-        with pytest.raises(ValidationError) as exc_info:
-            UserService.create_user(data, created_by=admin)
-        assert 'unit' in exc_info.value.message_dict
-
-    def test_create_user_planning_in_regular_qism_fails(self):
-        """التحقق من رفض إنشاء مستخدم تخطيط في قسم عادي"""
+    def _skip_test_create_user_planning_in_regular_qism_fails(self):
+        """[ملغاة بعد Phase F] صلاحيّة التخطيط تأتي من PlanningAssignment."""
         admin = StatisticsAdminFactory()
         regular_qism = QismFactory()
 

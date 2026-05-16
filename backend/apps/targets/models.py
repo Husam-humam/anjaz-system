@@ -130,13 +130,17 @@ class Target(models.Model):
                             'نطاق المستهدف يجب أن يكون دائرة أو مديرية أو قسم'
                         )
                     })
-                # الأقسام الخاصة (تخطيط/إحصاء) لا تُحدَّد لها مستهدفات
-                if scope.unit_type == 'qism' and scope.qism_role != 'regular':
-                    raise ValidationError({
-                        'scope_unit': (
-                            'لا يمكن تحديد مستهدفات للأقسام الخاصة (التخطيط/الإحصاء)'
-                        )
-                    })
+                # القسم يجب أن يكون مُسنَداً للتقديم (له SupervisedUnit)
+                # — أقسام التخطيط (PlanningAssignment) لا تأخذ مستهدفات
+                if scope.unit_type == 'qism':
+                    is_planning = hasattr(scope, 'planning_assignment')
+                    has_supervisor = hasattr(scope, 'supervisor_link')
+                    if is_planning or not has_supervisor:
+                        raise ValidationError({
+                            'scope_unit': (
+                                'مستهدفات الأقسام تكون فقط للأقسام المُسنَدة للتقديم'
+                            )
+                        })
 
         # 4) منع التكرار على مستوى المؤسسة (null scope) — PostgreSQL لا يفرض ذلك
         if self.scope_unit_id is None and self.indicator_id and self.year:

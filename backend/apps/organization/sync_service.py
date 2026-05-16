@@ -3,7 +3,7 @@
 
 المبدأ:
 - النظام الخارجي = مصدر الحقيقة للأسماء والأكواد والبنية الهرميّة وحالة النشاط
-- «أنجز» = يحتفظ محلياً بـ `qism_role` (لا يتدخّل فيه الـ sync)
+- «أنجز» = يحتفظ محلياً بالتخصيصات (PlanningAssignment / SupervisedUnit / ViewScope)
 - الوحدات التي اختفت من النظام الخارجي → تُعطَّل (soft delete) ولا تُحذَف
 - الوحدات اليدويّة القديمة (external_id IS NULL) → تُترك تماماً
 
@@ -366,7 +366,7 @@ class OrganizationSyncService:
     ) -> bool:
         """
         يُحدِّث وحدة موجودة. يُرجع True إذا تغيّر شيء فعلاً.
-        لا يلمس `qism_role` ولا أي حقل محلي خاص.
+        لا يلمس أي حقل محلي خاص (التخصيصات تبقى كما هي).
         """
         new_code = self._safe_code(ext_data['code'], local.external_id)
         changed = (

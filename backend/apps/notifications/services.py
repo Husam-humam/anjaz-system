@@ -73,11 +73,12 @@ class NotificationService:
         """إشعار بفتح أسبوع جديد"""
         # إشعار لجميع مديري الأقسام العادية النشطة
         # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
+        # مديرو الأقسام النشطين الذين أقسامهم مُسنَدة للتقديم
         recipients = User.objects.filter(
             role='section_manager',
             is_active=True,
             unit__is_active=True,
-            unit__qism_role='regular',
+            unit__supervisor_link__isnull=False,
         )
         NotificationService.create_bulk_notifications(
             recipients=recipients,
@@ -90,16 +91,19 @@ class NotificationService:
 
     @staticmethod
     def notify_submission_received(submission):
-        """إشعار قسم التخطيط باستلام منجز"""
-        parent = submission.qism.parent
-        if not parent:
-            return
-        # ملاحظة: سلسلة الدور تعتمد على القيم المعرّفة في نموذج المستخدم (UserRole)
+        """إشعار قسم التخطيط المُشرف على هذا القسم باستلام منجز"""
+        # نُحدّد مَن يُشرف على هذا القسم عبر SupervisedUnit
+        from apps.organization.models import SupervisedUnit
+        try:
+            link = SupervisedUnit.objects.select_related(
+                'assignment__planning_unit'
+            ).get(unit=submission.qism)
+        except SupervisedUnit.DoesNotExist:
+            return  # لا مُشرف معيَّن لهذا القسم
         planners = User.objects.filter(
             role='planning_section',
             is_active=True,
-            unit__parent=parent,
-            unit__qism_role='planning',
+            unit=link.assignment.planning_unit,
         )
         NotificationService.create_bulk_notifications(
             recipients=planners,

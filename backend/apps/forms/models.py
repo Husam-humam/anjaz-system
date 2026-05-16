@@ -77,7 +77,10 @@ class FormTemplate(models.Model):
 
     def clean(self):
         super().clean()
-        if self.qism.unit_type != 'qism' or self.qism.qism_role != 'regular':
+        # القالب يجب أن يكون لقسم مُسنَد للتقديم (له SupervisedUnit)
+        is_planning = hasattr(self.qism, 'planning_assignment')
+        is_supervised = hasattr(self.qism, 'supervisor_link')
+        if self.qism.unit_type != 'qism' or is_planning or not is_supervised:
             raise ValidationError({
                 'qism': 'يجب أن تكون الاستمارة مرتبطة بقسم عادي فقط'
             })

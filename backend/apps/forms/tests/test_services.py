@@ -8,11 +8,20 @@ from apps.forms.models import FormTemplate
 from apps.forms.services import FormTemplateService
 from apps.forms.tests.factories import FormTemplateFactory, FormTemplateItemFactory
 from apps.indicators.tests.factories import IndicatorFactory
+from apps.organization.models import PlanningAssignment, SupervisedUnit
 from apps.organization.tests.factories import QismFactory, MudiriyaFactory
 from apps.accounts.tests.factories import (
     PlanningSectionUserFactory,
     StatisticsAdminFactory,
 )
+
+
+def _supervise(planning_unit, *qisms):
+    """Helper: يُنشئ PlanningAssignment + SupervisedUnit للأقسام."""
+    assignment, _ = PlanningAssignment.objects.get_or_create(planning_unit=planning_unit)
+    for q in qisms:
+        SupervisedUnit.objects.get_or_create(assignment=assignment, unit=q)
+    return assignment
 
 
 @pytest.mark.django_db
@@ -23,10 +32,9 @@ class TestFormTemplateServiceCreate:
         """اختبار أن رقم الإصدار يحسب تلقائياً"""
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
-        # المخطط يجب أن ينتمي لنفس المديرية
-        planner = PlanningSectionUserFactory(
-            unit__parent=mudiriya,
-        )
+        # المخطط يجب أن ينتمي لنفس المديرية + يكون مُسنَداً لإدارة هذا القسم
+        planner = PlanningSectionUserFactory(unit__parent=mudiriya)
+        _supervise(planner.unit, qism)
         indicator = IndicatorFactory()
 
         data = {'qism': qism, 'notes': ''}
@@ -52,6 +60,7 @@ class TestFormTemplateServiceCreate:
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planner = PlanningSectionUserFactory(unit__parent=mudiriya)
+        _supervise(planner.unit, qism)
         data = {'qism': qism, 'notes': ''}
 
         with pytest.raises(ValidationError) as exc_info:
@@ -59,14 +68,14 @@ class TestFormTemplateServiceCreate:
 
         assert 'items' in exc_info.value.message_dict
 
-    def test_create_template_non_regular_qism_fails(self):
-        """اختبار فشل إنشاء قالب لقسم غير عادي"""
+    def test_create_template_for_unsupervised_qism_fails(self):
+        """قالب يتطلّب قسماً مُسنَداً للتقديم (له SupervisedUnit)."""
         mudiriya = MudiriyaFactory()
-        # قسم تخطيط بدلاً من عادي
-        planning_qism = QismFactory(parent=mudiriya, qism_role='planning')
+        # قسم بدون SupervisedUnit (مهما كان نوعه)
+        unassigned_qism = QismFactory(parent=mudiriya)
         planner = PlanningSectionUserFactory(unit__parent=mudiriya)
         indicator = IndicatorFactory()
-        data = {'qism': planning_qism, 'notes': ''}
+        data = {'qism': unassigned_qism, 'notes': ''}
         items_data = [
             {'indicator': indicator, 'is_mandatory': True, 'display_order': 0}
         ]

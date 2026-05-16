@@ -79,12 +79,17 @@ class TestSubmissionPermissions:
 
     def test_planning_section_approve_requires_submitted_status(self, api_client):
         """اعتماد المنجز يتطلب أن يكون في حالة 'مُرسل'"""
+        from apps.organization.models import PlanningAssignment, SupervisedUnit
         daira = DairaFactory()
         mudiriya = MudiriyaFactory(parent=daira)
         planning_qism = PlanningQismFactory(parent=mudiriya)
         planner = PlanningSectionUserFactory(unit=planning_qism)
 
         regular_qism = QismFactory(parent=mudiriya)
+        # ربط supervision صريح (بعد Phase F: لا MPTT fallback)
+        assignment = PlanningAssignment.objects.create(planning_unit=planning_qism)
+        SupervisedUnit.objects.create(assignment=assignment, unit=regular_qism)
+
         submission = WeeklySubmissionFactory(
             qism=regular_qism,
             status="draft",

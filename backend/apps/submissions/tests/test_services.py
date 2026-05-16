@@ -17,6 +17,7 @@ from apps.accounts.tests.factories import (
 )
 from apps.forms.tests.factories import FormTemplateFactory, FormTemplateItemFactory
 from apps.indicators.tests.factories import IndicatorFactory
+from apps.organization.models import PlanningAssignment, SupervisedUnit
 from apps.organization.tests.factories import (
     MudiriyaFactory,
     PlanningQismFactory,
@@ -35,6 +36,19 @@ from .factories import (
     WeeklyPeriodFactory,
     WeeklySubmissionFactory,
 )
+
+
+def _supervise(planning_qism, *qisms):
+    """
+    Helper اختبارات: يربط قسم تخطيط بالأقسام المُشرَف عليها.
+    يحلّ محلّ سلوك الـ MPTT fallback القديم — الآن نحتاج تخصيصاً صريحاً.
+    """
+    assignment, _ = PlanningAssignment.objects.get_or_create(
+        planning_unit=planning_qism
+    )
+    for q in qisms:
+        SupervisedUnit.objects.get_or_create(assignment=assignment, unit=q)
+    return assignment
 
 
 @pytest.mark.django_db
@@ -156,10 +170,11 @@ class TestSubmissionServiceApprove:
     @patch("apps.submissions.services._notify_qualitative_pending")
     def test_approve_transitions_to_approved(self, mock_qual, mock_notify):
         """اعتماد المنجز ينقل الحالة من مُرسل إلى معتمد"""
-        # القسم والمخطط يتبعان نفس المديرية
+        # القسم والمخطط يتبعان نفس المديرية + ربط supervision صريح
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planning_qism = PlanningQismFactory(parent=mudiriya)
+        _supervise(planning_qism, qism)
         submission = WeeklySubmissionFactory(qism=qism, status="submitted")
         planner = PlanningSectionUserFactory(unit=planning_qism)
 
@@ -179,6 +194,7 @@ class TestSubmissionServiceApprove:
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planning_qism = PlanningQismFactory(parent=mudiriya)
+        _supervise(planning_qism, qism)
         indicator = IndicatorFactory(unit_type="number", accumulation_type="sum")
         template = FormTemplateFactory(qism=qism, status="approved")
         item = FormTemplateItemFactory(
@@ -212,6 +228,7 @@ class TestSubmissionServiceApprove:
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planning_qism = PlanningQismFactory(parent=mudiriya)
+        _supervise(planning_qism, qism)
         submission = WeeklySubmissionFactory(qism=qism, status="draft")
         planner = PlanningSectionUserFactory(unit=planning_qism)
 
@@ -235,6 +252,7 @@ class TestSubmissionServiceApprove:
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planning_qism = PlanningQismFactory(parent=mudiriya)
+        _supervise(planning_qism, qism)
         submission = WeeklySubmissionFactory(qism=qism, status="submitted")
         planner = PlanningSectionUserFactory(unit=planning_qism)
 
@@ -252,6 +270,7 @@ class TestSubmissionServiceApprove:
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planning_qism = PlanningQismFactory(parent=mudiriya)
+        _supervise(planning_qism, qism)
         submission = WeeklySubmissionFactory(qism=qism, status="submitted")
         planner = PlanningSectionUserFactory(unit=planning_qism)
 

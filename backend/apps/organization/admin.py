@@ -11,8 +11,8 @@ from .models import (
 
 @admin.register(OrganizationUnit)
 class OrganizationUnitAdmin(MPTTModelAdmin):
-    list_display = ('name', 'code', 'unit_type', 'qism_role', 'parent', 'is_active', 'external_id')
-    list_filter = ('unit_type', 'qism_role', 'is_active')
+    list_display = ('name', 'code', 'unit_type', 'parent', 'is_active', 'external_id')
+    list_filter = ('unit_type', 'is_active')
     search_fields = ('name', 'code', 'external_id')
     readonly_fields = ('external_id', 'external_synced_at')
 

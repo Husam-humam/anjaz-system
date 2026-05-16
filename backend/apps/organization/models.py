@@ -12,13 +12,6 @@ class UnitType(models.TextChoices):
     QISM = 'qism', 'قسم'
 
 
-class QismRole(models.TextChoices):
-    """أدوار الأقسام"""
-    REGULAR = 'regular', 'عادي'
-    PLANNING = 'planning', 'تخطيط'
-    STATISTICS = 'statistics', 'إحصاء'
-
-
 class OrganizationUnit(MPTTModel):
     """نموذج الكيان التنظيمي - يمثل الهيكل التنظيمي للمؤسسة"""
 
@@ -37,12 +30,6 @@ class OrganizationUnit(MPTTModel):
         max_length=20,
         choices=UnitType.choices,
         verbose_name='نوع الكيان',
-    )
-    qism_role = models.CharField(
-        max_length=20,
-        choices=QismRole.choices,
-        default=QismRole.REGULAR,
-        verbose_name='دور القسم',
     )
     parent = TreeForeignKey(
         'self',
@@ -111,12 +98,11 @@ class OrganizationUnit(MPTTModel):
                 })
 
         elif self.unit_type == UnitType.QISM:
-            # الأقسام الخاصة (إحصاء/تخطيط) يمكن أن تكون بدون أب
-            if self.parent is None and self.qism_role == QismRole.REGULAR:
+            if self.parent is None:
                 raise ValidationError({
                     'parent': 'القسم يجب أن يتبع مديرية أو دائرة.'
                 })
-            if self.parent is not None and self.parent.unit_type not in (UnitType.MUDIRIYA, UnitType.DAIRA):
+            if self.parent.unit_type not in (UnitType.MUDIRIYA, UnitType.DAIRA):
                 raise ValidationError({
                     'parent': 'القسم يجب أن يتبع مديرية أو دائرة فقط.'
                 })
@@ -126,10 +112,6 @@ class OrganizationUnit(MPTTModel):
             raise ValidationError({
                 'parent': 'القسم لا يمكن أن يكون كياناً أباً لأي كيان آخر.'
             })
-
-        # دور القسم له معنى فقط عندما يكون نوع الكيان "قسم"
-        if self.unit_type != UnitType.QISM:
-            self.qism_role = QismRole.REGULAR
 
     def save(self, *args, **kwargs):
         self.full_clean()

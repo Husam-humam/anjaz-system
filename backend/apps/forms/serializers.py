@@ -81,11 +81,13 @@ class FormTemplateItemCreateSerializer(serializers.Serializer):
 class FormTemplateCreateSerializer(serializers.Serializer):
     """مسلسل إنشاء قالب الاستمارة مع البنود"""
     qism = serializers.PrimaryKeyRelatedField(
+        # القسم يجب أن يكون مُسنَداً للتقديم (له SupervisedUnit)
         queryset=OrganizationUnit.objects.filter(
-            unit_type='qism', qism_role='regular', is_active=True
+            unit_type='qism', is_active=True,
+            supervisor_link__isnull=False,
         ),
         error_messages={
-            'does_not_exist': 'القسم المحدد غير موجود',
+            'does_not_exist': 'القسم المحدد غير موجود أو غير مُسنَد للتقديم',
             'incorrect_type': 'قيمة غير صالحة لمعرف القسم',
         }
     )

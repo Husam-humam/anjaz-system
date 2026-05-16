@@ -56,7 +56,6 @@ class TestOrganizationServiceCreateUnit:
             'name': 'قسم البرمجة',
             'code': 'Q100',
             'unit_type': 'qism',
-            'qism_role': 'regular',
             'parent': mudiriya,
         }
         unit = OrganizationService.create_unit(data)

@@ -56,23 +56,27 @@ class TestManageScopeWithAssignment:
         assert scope == {q1.id, q2.id}
         assert q3.id not in scope
 
-    def test_planner_without_assignment_falls_back_to_mptt(self):
-        """قبل Phase E، نحافظ على سلوك MPTT القديم للمخطّطين بدون assignment."""
+    def test_planner_without_assignment_has_empty_scope(self):
+        """بعد Phase F: لا يوجد MPTT fallback. بدون assignment = نطاق فارغ."""
         mudiriya = MudiriyaFactory()
-        # planning unit تابعة لـ mudiriya — لها أقسام أخوة
         planning_unit = PlanningQismFactory(parent=mudiriya)
         planner = PlanningSectionUserFactory(unit=planning_unit)
-        sibling = QismFactory(parent=mudiriya)  # تحت نفس المديريّة
+        QismFactory(parent=mudiriya)  # أخ في نفس المديرية — لكنه ليس supervised
 
         scope = _planning_section_scope_qism_ids(planner)
 
-        # fallback: يجب أن يرى الأخ
-        assert sibling.id in scope
+        # بدون PlanningAssignment: لا نطاق
+        assert scope == set()
 
-    def test_section_manager_scope_is_own_unit(self):
+    def test_section_manager_not_a_planner(self):
+        """
+        section_manager ليس planner — `_planning_section_scope_qism_ids` لا
+        تنطبق عليه. نطاق section_manager = {user.unit_id} يُعالَج في querysets.
+        """
         qism = QismFactory()
         mgr = SectionManagerFactory(unit=qism)
-        assert _planning_section_scope_qism_ids(mgr) == {qism.id}
+        # الدالة تُرجع set() لأنه لا يوجد PlanningAssignment لقسم section_manager
+        assert _planning_section_scope_qism_ids(mgr) == set()
 
     def test_viewer_manages_nothing(self):
         viewer = ViewerFactory()
