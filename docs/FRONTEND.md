@@ -40,8 +40,7 @@
 ### Statistics Admin Only
 | Route | Page | Description |
 |---|---|---|
-| `/organization` | الهيكل التنظيمي | Read-only tree view from external system + **auto-sync on page open** + manual "Sync now" button |
-| `/organization/assignments` | تخصيصات أقسام التخطيط | **NEW (Phase G)**: manage `PlanningAssignment` + `SupervisedUnit` — assign which qism acts as planning, manage supervised units |
+| `/organization` | الهيكل التنظيمي | Read-only tree view from external system + **auto-sync on every page open** + **click any qism to manage its assignment role** (planning / supervised / unassigned) in an inline dialog |
 | `/indicators` | بنك المؤشرات | List + manage indicators (+ categories tab) |
 | `/users` | إدارة المستخدمين | List + create + edit users |
 | `/periods` | الأسابيع | List weeks, open/close, compliance + extensions |
@@ -196,15 +195,18 @@
   └─ 👥 قسم الأرشيف (ARCH)            [غير مُسنَد]
 ```
 
-### 3.4.b Planning Assignments (`/organization/assignments`) — Phase G
+### 3.4.b Qism Assignment Dialog (in-tree)
 
-Admin-only. Manages `PlanningAssignment` rows + their `SupervisedUnit` children.
+Admin clicks any active qism in the tree → modal opens with three modes based on the unit's current role:
 
-- Grid of cards — each card = one planning assignment.
-- Card shows: planning unit name + context_parent + list of supervised units.
-- Actions per card: **"إدارة الأقسام المُشرَف عليها"** (modal to add/remove supervised qisms) and **"حذف"**.
-- Top-right button **"تخصيص قسم تخطيط جديد"** opens a dialog to pick any non-assigned qism + optional context_parent.
-- Conflict guard: dropdown of "available supervised qisms" filters out those already supervised (OneToOne `SupervisedUnit.unit`).
+1. **Unassigned** — single button "تخصيصه كقسم تخطيط" that creates a `PlanningAssignment`.
+2. **Supervised** — read-only info card showing which planning unit supervises it, with a hint to manage the link from that planning unit's dialog instead.
+3. **Planning** — full management panel:
+   - Dropdown of available qisms (auto-excludes already-planning and already-supervised units) + "إضافة" button to add a `SupervisedUnit`.
+   - Scrollable list of supervised units, each with a delete (✕) button.
+   - "إلغاء دور التخطيط لهذا القسم" button at the bottom (with confirm prompt) deletes the whole `PlanningAssignment`.
+
+All actions update the tree (badges) and the dialog (lists) without closing the modal.
 
 ---
 
