@@ -9,20 +9,31 @@
 
 ## Permissions Matrix
 
-| Endpoint Group | statistics_admin | planning_section | section_manager |
-|---|:---:|:---:|:---:|
-| Auth | ✅ | ✅ | ✅ |
-| Organization | ✅ CRUD | 👁 Read | 👁 Read (own) |
-| Users | ✅ CRUD | ❌ | ❌ |
-| Indicators | ✅ CRUD | 👁 Read | 👁 Read |
-| Form Templates | ✅ Approve | ✅ CRUD + Approve (scope) | 👁 Read (own) |
-| Targets | ✅ CRUD | 👁 Read | 👁 Read (own) |
-| Weekly Periods | ✅ CRUD | 👁 Read | 👁 Read |
-| Submissions | ✅ Admin Review (all) | ✅ Approve (scope) | ✅ CRUD (own) |
-| Admin Review (`admin-*`) | ✅ | ❌ | ❌ |
-| Audit Log | ✅ All | 👁 Read (scope) | 👁 Read (own) |
-| Reports | ✅ All | ✅ Own directorate | ✅ Own section |
-| Notifications | ✅ | ✅ | ✅ |
+| Endpoint Group | statistics_admin | planning_section | section_manager | viewer |
+|---|:---:|:---:|:---:|:---:|
+| Auth | ✅ | ✅ | ✅ | ✅ |
+| Organization | ✅ CRUD + Sync | 👁 Read | 👁 Read (own) | 👁 Read (ViewScope) |
+| Planning Assignments | ✅ CRUD | ❌ | ❌ | ❌ |
+| View Scopes | ✅ CRUD | ❌ | ❌ | ❌ |
+| Users | ✅ CRUD | ❌ | ❌ | ❌ |
+| Indicators | ✅ CRUD | 👁 Read | 👁 Read | 👁 Read |
+| Form Templates | ✅ Approve | ✅ CRUD + Approve (scope) | 👁 Read (own) | 👁 Read (ViewScope) |
+| Targets | ✅ CRUD | 👁 Read | 👁 Read (own) | 👁 Read (ViewScope) |
+| Weekly Periods | ✅ CRUD | 👁 Read | 👁 Read | 👁 Read |
+| Submissions | ✅ Admin Review (all) | ✅ Approve (scope) | ✅ CRUD (own) | 👁 Read (ViewScope) |
+| Admin Review (`admin-*`) | ✅ | ❌ | ❌ | ❌ |
+| Audit Log | ✅ All | 👁 Read (scope) | 👁 Read (own) | 👁 Read (ViewScope) |
+| Reports | ✅ All | ✅ Own directorate | ✅ Own section | 👁 (ViewScope) |
+| Notifications | ✅ | ✅ | ✅ | ✅ |
+
+**ملاحظة الأدوار (Phase F+):**
+- مفهوم `qism_role` أُلغي. التمييز الآن يأتي من **التخصيصات الصريحة**:
+  - `PlanningAssignment` يُعرّف أنّ وحدة تعمل كقسم تخطيط.
+  - `SupervisedUnit` يربط قسماً عاديّاً بقسم تخطيط معيّن (OneToOne).
+  - `ViewScope` يمنح المستخدم رؤية وحدات إضافيّة (لا تحكّم).
+- دور **`viewer`** = قراءة فقط — يُحظر أي إجراء كتابة عبر `IsNotViewer` permission.
+- نطاق رؤية `planning_section` = الأقسام في `assignment.supervised_units` ∪ `ViewScope.viewable_units` (إن وُجد).
+- نطاق رؤية `viewer` = `ViewScope.viewable_units` فقط.
 
 ---
 
@@ -95,18 +106,19 @@ Returns the full organization tree.
 
 ### GET `/api/organization/units/`
 Flat list with filters.  
-**Query params:** `unit_type`, `qism_role`, `parent_id`, `is_active`, `search`
+**Query params:** `unit_type`, `parent_id`, `is_active`, `search`
+
+> ملاحظة: حقل `qism_role` أُلغي. التمييز بين «قسم تخطيط» / «قسم مُشرَف عليه» / «غير مُسنَد» يأتي الآن من الحقول المُشتقّة `is_planning` و `is_supervised` في الاستجابة.
 
 ### POST `/api/organization/units/`
-Create a unit. **Permission:** `statistics_admin` only.
+Create a unit. **Permission:** `statistics_admin` only.  
+> الوحدات تُدار عادةً عبر المزامنة من النظام الخارجي. الإنشاء اليدوي محصور بالحالات الاستثنائيّة.
 
-**Request:**
 ```json
 {
   "name": "قسم التوظيف",
   "code": "EMP",
   "unit_type": "qism",
-  "qism_role": "regular",
   "parent": 2
 }
 ```
@@ -115,6 +127,97 @@ Create a unit. **Permission:** `statistics_admin` only.
 ### PATCH `/api/organization/units/{id}/`
 ### DELETE `/api/organization/units/{id}/`
 Soft delete (sets `is_active=False`). **Permission:** `statistics_admin` only.
+
+### POST `/api/organization/units/sync/`
+مزامنة الهيكل التنظيمي من النظام الخارجي. **Permission:** `statistics_admin` only.  
+يُستدعى تلقائياً عند فتح صفحة «الهيكل التنظيمي» في الـ frontend + يدوياً عبر زر «مزامنة الآن».
+
+**Query params:**  
+- `dry_run=1` — يُحاكي العمليّة ويُرجع التقرير دون أي كتابة.
+
+**Response (200):**
+```json
+{
+  "created": 0,
+  "updated": 5,
+  "deactivated": 0,
+  "skipped_unknown_type": 0,
+  "errors": [],
+  "summary": "تمّت إضافة 0 / تحديث 5 / تعطيل 0",
+  "started_at": "2026-05-16T08:00:00Z",
+  "finished_at": "2026-05-16T08:00:03Z",
+  "dry_run": false
+}
+```
+
+**Response (502):**
+```json
+{ "detail": "فشل الاتصال بالنظام الخارجي: ..." }
+```
+
+---
+
+## 2.b Planning Assignments — تخصيصات أقسام التخطيط
+
+**Permission:** `statistics_admin` only.
+
+### GET `/api/organization/planning-assignments/`
+يُرجع كل التخصيصات مع الأقسام المُشرَف عليها.
+
+### POST `/api/organization/planning-assignments/`
+إنشاء تخصيص جديد.
+
+```json
+{
+  "planning_unit": 12,
+  "context_parent": 3,
+  "notes": ""
+}
+```
+
+### PATCH `/api/organization/planning-assignments/{id}/`
+تعديل (لا يسمح بتغيير `planning_unit` — إنشاء تخصيص جديد بدلاً منه).
+
+### DELETE `/api/organization/planning-assignments/{id}/`
+حذف التخصيص. يلغي دور التخطيط لذلك القسم.
+
+### POST `/api/organization/planning-assignments/{id}/supervised-units/`
+إضافة قسم تحت إشراف التخصيص.
+
+```json
+{ "unit": 25 }
+```
+
+**Responses:**
+- `201`: نجح الربط — `{ id, unit, unit_name, unit_code }`
+- `409`: الوحدة مُشرَف عليها بالفعل من قِبَل تخصيص آخر
+
+### DELETE `/api/organization/planning-assignments/{id}/supervised-units/{unit_id}/`
+إزالة قسم من إشراف التخصيص.
+
+---
+
+## 2.c View Scopes — نطاقات الاطّلاع
+
+**Permission:** `statistics_admin` only.  
+تمنح المستخدم (viewer أو planning_section موسَّع) رؤية وحدات إضافيّة دون التحكّم بها.
+
+### GET `/api/organization/view-scopes/`
+**Query params:** `user`
+
+### POST `/api/organization/view-scopes/`
+```json
+{
+  "user": 8,
+  "viewable_units": [10, 12, 15],
+  "notes": ""
+}
+```
+
+### PATCH `/api/organization/view-scopes/{id}/`
+تعديل قائمة `viewable_units`.
+
+### DELETE `/api/organization/view-scopes/{id}/`
 
 ---
 

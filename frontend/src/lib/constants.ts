@@ -72,7 +72,21 @@ export const ROLE_LABELS: Record<string, string> = {
   statistics_admin: "مدير قسم الإحصاء",
   planning_section: "قسم التخطيط",
   section_manager: "مدير قسم",
+  viewer: "مُطّلِع",
 };
+
+/** شارات «دور القسم» المُشتقّة من التخصيصات (Phase F+) */
+export const QISM_ASSIGNMENT_LABELS = {
+  planning: "تخطيط",
+  supervised: "مُشرَف عليه",
+  unassigned: "غير مُسنَد",
+} as const;
+
+export const QISM_ASSIGNMENT_COLORS = {
+  planning: "bg-amber-100 text-amber-700",
+  supervised: "bg-teal-100 text-teal-700",
+  unassigned: "bg-gray-100 text-gray-500",
+} as const;
 
 export const UNIT_TYPE_LABELS: Record<string, string> = {
   number: "رقم",

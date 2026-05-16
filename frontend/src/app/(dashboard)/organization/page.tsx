@@ -1,28 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   getOrganizationTree,
-  createOrganizationUnit,
-  updateOrganizationUnit,
+  syncOrganizationFromExternal,
 } from "@/lib/api/organization";
-import type { OrganizationUnit } from "@/types/organization";
+import type { OrganizationUnit, OrganizationSyncReport } from "@/types/organization";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { ChevronDown, ChevronLeft, Plus, Pencil, Ban } from "lucide-react";
+  QISM_ASSIGNMENT_COLORS,
+  QISM_ASSIGNMENT_LABELS,
+} from "@/lib/constants";
+import { ChevronDown, ChevronLeft, RefreshCw, Settings } from "lucide-react";
 
 const UNIT_TYPE_LABELS: Record<string, string> = {
   daira: "دائرة",
@@ -33,43 +28,44 @@ const UNIT_TYPE_LABELS: Record<string, string> = {
 const UNIT_TYPE_COLORS: Record<string, string> = {
   daira: "bg-purple-100 text-purple-700",
   mudiriya: "bg-blue-100 text-blue-700",
-  qism: "bg-teal-100 text-teal-700",
+  qism: "bg-blue-50 text-blue-600",
 };
 
-const QISM_ROLE_LABELS: Record<string, string> = {
-  regular: "عادي",
-  planning: "تخطيط",
-  statistics: "إحصاء",
-};
-
-const QISM_ROLE_COLORS: Record<string, string> = {
-  regular: "bg-gray-100 text-gray-600",
-  planning: "bg-amber-100 text-amber-700",
-  statistics: "bg-indigo-100 text-indigo-700",
-};
-
-interface UnitFormData {
-  name: string;
-  code: string;
-  unit_type: "daira" | "mudiriya" | "qism";
-  qism_role: "regular" | "planning" | "statistics";
-  parent: number | null;
+function qismBadge(node: OrganizationUnit) {
+  if (node.unit_type !== "qism") return null;
+  if (node.is_planning) {
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${QISM_ASSIGNMENT_COLORS.planning}`}
+      >
+        {QISM_ASSIGNMENT_LABELS.planning}
+      </span>
+    );
+  }
+  if (node.is_supervised) {
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${QISM_ASSIGNMENT_COLORS.supervised}`}
+      >
+        {QISM_ASSIGNMENT_LABELS.supervised}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${QISM_ASSIGNMENT_COLORS.unassigned}`}
+    >
+      {QISM_ASSIGNMENT_LABELS.unassigned}
+    </span>
+  );
 }
-
-const initialFormData: UnitFormData = {
-  name: "",
-  code: "",
-  unit_type: "daira",
-  qism_role: "regular",
-  parent: null,
-};
 
 export default function OrganizationPage() {
   const queryClient = useQueryClient();
+  const { isAdmin } = usePermissions();
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [formData, setFormData] = useState<UnitFormData>(initialFormData);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [syncReport, setSyncReport] = useState<OrganizationSyncReport | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const {
     data: tree,
@@ -81,22 +77,33 @@ export default function OrganizationPage() {
     queryFn: getOrganizationTree,
   });
 
-  const createMutation = useMutation({
-    mutationFn: (data: Partial<OrganizationUnit>) => createOrganizationUnit(data),
-    onSuccess: () => {
+  const syncMutation = useMutation({
+    mutationFn: () => syncOrganizationFromExternal(false),
+    onSuccess: (report) => {
+      setSyncReport(report);
+      setSyncError(null);
       queryClient.invalidateQueries({ queryKey: ["organization-tree"] });
-      closeDialog();
+    },
+    onError: (err: unknown) => {
+      // axios error
+      const message =
+        (err as { response?: { data?: { detail?: string } }; message?: string })
+          ?.response?.data?.detail ||
+        (err as { message?: string })?.message ||
+        "تعذّر إجراء المزامنة";
+      setSyncError(message);
+      setSyncReport(null);
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<OrganizationUnit> }) =>
-      updateOrganizationUnit(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["organization-tree"] });
-      closeDialog();
-    },
-  });
+  // مزامنة تلقائيّة عند فتح الصفحة — للأدمن فقط (هو الوحيد المُخوَّل).
+  // نستخدم useEffect بدون dependency على syncMutation لتجنّب التشغيل المتكرّر.
+  useEffect(() => {
+    if (isAdmin()) {
+      syncMutation.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleNode = (id: number) => {
     setExpandedNodes((prev) => {
@@ -109,51 +116,6 @@ export default function OrganizationPage() {
       return next;
     });
   };
-
-  const openAddDialog = (parentId: number | null = null, parentType?: string) => {
-    let defaultType: "daira" | "mudiriya" | "qism" = "daira";
-    if (parentType === "daira") defaultType = "mudiriya";
-    if (parentType === "mudiriya" || parentType === "daira") defaultType = "qism";
-
-    setFormData({ ...initialFormData, parent: parentId, unit_type: defaultType });
-    setEditingId(null);
-    setDialogOpen(true);
-  };
-
-  const openEditDialog = (unit: OrganizationUnit) => {
-    setFormData({
-      name: unit.name,
-      code: unit.code,
-      unit_type: unit.unit_type,
-      qism_role: unit.qism_role,
-      parent: unit.parent,
-    });
-    setEditingId(unit.id);
-    setDialogOpen(true);
-  };
-
-  const closeDialog = () => {
-    setDialogOpen(false);
-    setFormData(initialFormData);
-    setEditingId(null);
-  };
-
-  const handleSubmit = () => {
-    if (editingId) {
-      updateMutation.mutate({ id: editingId, data: formData });
-    } else {
-      createMutation.mutate(formData);
-    }
-  };
-
-  const handleDeactivate = (unit: OrganizationUnit) => {
-    updateMutation.mutate({
-      id: unit.id,
-      data: { is_active: !unit.is_active },
-    });
-  };
-
-  const isMutating = createMutation.isPending || updateMutation.isPending;
 
   if (isLoading) {
     return <LoadingSpinner size="lg" />;
@@ -175,7 +137,6 @@ export default function OrganizationPage() {
           }`}
           style={{ paddingRight: `${level * 32 + 16}px` }}
         >
-          {/* زر التوسيع */}
           <button
             onClick={() => toggleNode(node.id)}
             className={`w-6 h-6 flex items-center justify-center rounded transition ${
@@ -193,13 +154,11 @@ export default function OrganizationPage() {
               ))}
           </button>
 
-          {/* اسم الوحدة */}
           <div className="flex-1 min-w-0">
             <span className="font-medium text-gray-900">{node.name}</span>
             <span className="text-xs text-gray-400 mr-2">({node.code})</span>
           </div>
 
-          {/* شارة نوع الوحدة */}
           <span
             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
               UNIT_TYPE_COLORS[node.unit_type] || ""
@@ -208,56 +167,11 @@ export default function OrganizationPage() {
             {UNIT_TYPE_LABELS[node.unit_type] || node.unit_type}
           </span>
 
-          {/* شارة دور القسم */}
-          {node.unit_type === "qism" && (
-            <span
-              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                QISM_ROLE_COLORS[node.qism_role] || ""
-              }`}
-            >
-              {QISM_ROLE_LABELS[node.qism_role] || node.qism_role}
-            </span>
-          )}
-
-          {/* أزرار الإجراءات */}
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => openEditDialog(node)}
-              title="تعديل"
-            >
-              <Pencil className="w-4 h-4" />
-            </Button>
-            {node.unit_type !== "qism" && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => openAddDialog(node.id, node.unit_type)}
-                title="إضافة وحدة فرعية"
-              >
-                <Plus className="w-4 h-4" />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-red-500 hover:text-red-700"
-              onClick={() => handleDeactivate(node)}
-              title={node.is_active ? "تعطيل" : "تفعيل"}
-            >
-              <Ban className="w-4 h-4" />
-            </Button>
-          </div>
+          {qismBadge(node)}
         </div>
 
-        {/* العناصر الفرعية */}
         {hasChildren && isExpanded && (
-          <div>
-            {node.children!.map((child) => renderNode(child, level + 1))}
-          </div>
+          <div>{node.children!.map((child) => renderNode(child, level + 1))}</div>
         )}
       </div>
     );
@@ -265,126 +179,66 @@ export default function OrganizationPage() {
 
   return (
     <div className="space-y-6">
-      {/* العنوان */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">الهيكل التنظيمي</h1>
-          <p className="text-gray-500 mt-1">إدارة الوحدات التنظيمية للمؤسسة</p>
+          <p className="text-gray-500 mt-1">
+            يتم التحديث آلياً من النظام المركزي عند كل فتح لهذه الصفحة. للتعديل، استخدم النظام الخارجي.
+          </p>
         </div>
-        <Button onClick={() => openAddDialog(null)}>
-          <Plus className="w-4 h-4 ml-2" />
-          إضافة وحدة جذرية
-        </Button>
+        {isAdmin() && (
+          <div className="flex items-center gap-2">
+            {syncMutation.isPending && (
+              <span className="inline-flex items-center text-sm text-gray-500">
+                <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
+                جارٍ المزامنة...
+              </span>
+            )}
+            <Link href="/organization/assignments">
+              <Button>
+                <Settings className="w-4 h-4 ml-2" />
+                إدارة تخصيصات التخطيط
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
-      {/* الشجرة */}
+      {isAdmin() && (syncReport || syncError || syncMutation.isPending) && (
+        <div
+          className={`rounded-lg border p-4 ${
+            syncError
+              ? "border-red-200 bg-red-50 text-red-800"
+              : syncMutation.isPending
+              ? "border-blue-200 bg-blue-50 text-blue-800"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          }`}
+        >
+          {syncMutation.isPending && (
+            <p className="text-sm">جارٍ مزامنة الهيكل التنظيمي من النظام المركزي...</p>
+          )}
+          {syncError && (
+            <p className="text-sm">
+              <strong>تعذّرت المزامنة:</strong> {syncError}
+            </p>
+          )}
+          {syncReport && !syncMutation.isPending && !syncError && (
+            <p className="text-sm">
+              <strong>تمّت المزامنة:</strong> {syncReport.summary}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border">
         {!tree || tree.length === 0 ? (
-          <EmptyState message="لا توجد وحدات تنظيمية بعد. ابدأ بإضافة وحدة جذرية." />
+          <EmptyState message="لا توجد وحدات تنظيمية بعد. اضغط «مزامنة الآن» لجلبها من النظام المركزي." />
         ) : (
           <div className="divide-y divide-gray-50 p-2">
             {tree.map((node) => renderNode(node, 0))}
           </div>
         )}
       </div>
-
-      {/* مربع حوار الإضافة/التعديل */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? "تعديل الوحدة التنظيمية" : "إضافة وحدة تنظيمية"}
-            </DialogTitle>
-            <DialogDescription>
-              {editingId
-                ? "قم بتعديل بيانات الوحدة التنظيمية"
-                : "أدخل بيانات الوحدة التنظيمية الجديدة"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">اسم الوحدة</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, name: e.target.value }))
-                }
-                placeholder="أدخل اسم الوحدة"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="code">الرمز</Label>
-              <Input
-                id="code"
-                value={formData.code}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, code: e.target.value }))
-                }
-                placeholder="أدخل رمز الوحدة"
-                dir="ltr"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="unit_type">نوع الوحدة</Label>
-              <select
-                id="unit_type"
-                value={formData.unit_type}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    unit_type: e.target.value as UnitFormData["unit_type"],
-                  }))
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
-                dir="rtl"
-              >
-                <option value="daira">دائرة</option>
-                <option value="mudiriya">مديرية</option>
-                <option value="qism">قسم</option>
-              </select>
-            </div>
-
-            {formData.unit_type === "qism" && (
-              <div className="space-y-2">
-                <Label htmlFor="qism_role">دور القسم</Label>
-                <select
-                  id="qism_role"
-                  value={formData.qism_role}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      qism_role: e.target.value as UnitFormData["qism_role"],
-                    }))
-                  }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
-                  dir="rtl"
-                >
-                  <option value="regular">عادي</option>
-                  <option value="planning">تخطيط</option>
-                  <option value="statistics">إحصاء</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button onClick={handleSubmit} disabled={isMutating || !formData.name || !formData.code}>
-              {isMutating
-                ? "جارٍ الحفظ..."
-                : editingId
-                ? "حفظ التعديلات"
-                : "إضافة"}
-            </Button>
-            <Button variant="outline" onClick={closeDialog}>
-              إلغاء
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

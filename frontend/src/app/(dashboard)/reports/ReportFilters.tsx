@@ -79,7 +79,7 @@ export function ReportFilters({
   const qisms = useMemo(
     () =>
       (qismsData?.results || []).filter(
-        (q: OrganizationUnit) => q.qism_role === "regular"
+        (q: OrganizationUnit) => !q.is_planning
       ),
     [qismsData]
   );

@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, createUser, updateUser } from "@/lib/api/users";
-import { getOrganizationUnits } from "@/lib/api/organization";
+import {
+  getOrganizationUnits,
+  getViewScopeForUser,
+  upsertViewScope,
+  deleteViewScope,
+} from "@/lib/api/organization";
 import type { User } from "@/types/submissions";
 import type { OrganizationUnit } from "@/types/organization";
 import { ROLE_LABELS } from "@/lib/constants";
@@ -22,7 +27,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, Search, Pencil, AlertCircle, Info } from "lucide-react";
+import { Plus, Search, Pencil, AlertCircle, Eye } from "lucide-react";
 import { getErrorMessage } from "@/lib/utils";
 
 interface UserFormData {
@@ -49,25 +54,25 @@ export default function UsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formData, setFormData] = useState<UserFormData>(initialFormData);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // نطاق الاطّلاع لدور viewer / planning_section الموسَّع
+  const [viewScopeUserId, setViewScopeUserId] = useState<number | null>(null);
+  const [viewScopeUnits, setViewScopeUnits] = useState<number[]>([]);
+  const [existingScopeId, setExistingScopeId] = useState<number | undefined>();
+  const [scopeError, setScopeError] = useState<string | null>(null);
 
   const params: Record<string, string> = {};
   if (search) params.search = search;
   if (roleFilter) params.role = roleFilter;
   if (activeFilter) params.is_active = activeFilter;
 
-  const {
-    data: usersData,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery({
+  const { data: usersData, isLoading, isError, refetch } = useQuery({
     queryKey: ["users", params],
     queryFn: () => getUsers(params),
   });
 
   const { data: unitsData } = useQuery({
-    queryKey: ["organization-units"],
-    queryFn: () => getOrganizationUnits(),
+    queryKey: ["organization-units-all"],
+    queryFn: () => getOrganizationUnits({ page_size: "1000" }),
   });
 
   const createMutation = useMutation({
@@ -90,6 +95,29 @@ export default function UsersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       closeDialog();
+    },
+  });
+
+  const scopeSaveMutation = useMutation({
+    mutationFn: (payload: {
+      id?: number;
+      user: number;
+      viewable_units: number[];
+    }) => upsertViewScope(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["view-scopes"] });
+      closeScopeDialog();
+    },
+    onError: (err) => {
+      setScopeError(getErrorMessage(err));
+    },
+  });
+
+  const scopeDeleteMutation = useMutation({
+    mutationFn: (id: number) => deleteViewScope(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["view-scopes"] });
+      closeScopeDialog();
     },
   });
 
@@ -119,7 +147,31 @@ export default function UsersPage() {
     updateMutation.reset();
   };
 
-  // عند تغيير الدور، نمسح الوحدة المختارة لأن القائمة ستتغيّر
+  const openScopeDialog = async (user: User) => {
+    setViewScopeUserId(user.id);
+    setScopeError(null);
+    setExistingScopeId(undefined);
+    setViewScopeUnits([]);
+    try {
+      const existing = await getViewScopeForUser(user.id);
+      if (existing) {
+        setExistingScopeId(existing.id);
+        setViewScopeUnits(existing.viewable_units);
+      }
+    } catch (err) {
+      setScopeError(getErrorMessage(err));
+    }
+  };
+
+  const closeScopeDialog = () => {
+    setViewScopeUserId(null);
+    setViewScopeUnits([]);
+    setExistingScopeId(undefined);
+    setScopeError(null);
+    scopeSaveMutation.reset();
+    scopeDeleteMutation.reset();
+  };
+
   const handleRoleChange = (newRole: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -134,12 +186,8 @@ export default function UsersPage() {
         full_name: formData.full_name,
         role: formData.role,
       };
-      if (formData.password) {
-        updateData.password = formData.password;
-      }
-      if (formData.unit) {
-        updateData.unit = formData.unit;
-      }
+      if (formData.password) updateData.password = formData.password;
+      if (formData.unit) updateData.unit = formData.unit;
       updateMutation.mutate({ id: editingId, data: updateData as Partial<User> });
     } else {
       createMutation.mutate({
@@ -163,48 +211,50 @@ export default function UsersPage() {
   const users = usersData?.results || [];
   const units = unitsData?.results || [];
 
-  // تصفية الوحدات حسب الدور المختار — كل دور يحتاج نوع قسم مختلف
+  // الوحدات المتاحة لكل دور (بعد إلغاء qism_role):
+  // - section_manager: قسم غير قسم تخطيط (is_planning=false)
+  // - planning_section: قسم له PlanningAssignment (is_planning=true)
+  // - statistics_admin / viewer: أيّ وحدة (الوحدة اختياريّة لكليهما)
   const getFilteredUnitsForRole = (role: string): OrganizationUnit[] => {
-    if (role === "statistics_admin") {
+    if (role === "section_manager") {
       return units.filter(
-        (u: OrganizationUnit) =>
-          u.unit_type === "qism" && u.qism_role === "statistics"
+        (u: OrganizationUnit) => u.unit_type === "qism" && !u.is_planning,
       );
     }
     if (role === "planning_section") {
       return units.filter(
-        (u: OrganizationUnit) =>
-          u.unit_type === "qism" && u.qism_role === "planning"
+        (u: OrganizationUnit) => u.unit_type === "qism" && u.is_planning === true,
       );
     }
-    if (role === "section_manager") {
-      return units.filter(
-        (u: OrganizationUnit) =>
-          u.unit_type === "qism" && u.qism_role === "regular"
-      );
+    if (role === "statistics_admin" || role === "viewer") {
+      return units;
     }
     return [];
   };
 
   const filteredUnitsForForm = getFilteredUnitsForRole(formData.role);
 
-  // مساعد لعرض التسمية الكاملة (اسم القسم + الأب) لوضوح أكبر
   const formatUnitLabel = (unit: OrganizationUnit): string => {
     const parentName = unit.parent_name ? ` — ${unit.parent_name}` : "";
     return `${unit.name}${parentName}`;
   };
 
-  if (isLoading) {
-    return <LoadingSpinner size="lg" />;
-  }
+  const toggleScopeUnit = (unitId: number) => {
+    setViewScopeUnits((prev) =>
+      prev.includes(unitId)
+        ? prev.filter((id) => id !== unitId)
+        : [...prev, unitId],
+    );
+  };
 
-  if (isError) {
-    return <ErrorState onRetry={() => refetch()} />;
-  }
+  if (isLoading) return <LoadingSpinner size="lg" />;
+  if (isError) return <ErrorState onRetry={() => refetch()} />;
+
+  const userNeedsScope = (role: string) =>
+    role === "viewer" || role === "planning_section";
 
   return (
     <div className="space-y-6">
-      {/* العنوان */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">إدارة المستخدمين</h1>
@@ -216,7 +266,6 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {/* الفلاتر */}
       <div className="bg-white rounded-xl shadow-sm border p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="relative">
@@ -254,7 +303,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* الجدول */}
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         {users.length === 0 ? (
           <EmptyState message="لا يوجد مستخدمون مطابقون لمعايير البحث." />
@@ -315,6 +363,16 @@ export default function UsersPage() {
                           <Pencil className="w-4 h-4 ml-1" />
                           تعديل
                         </Button>
+                        {userNeedsScope(user.role) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openScopeDialog(user)}
+                          >
+                            <Eye className="w-4 h-4 ml-1" />
+                            نطاق الاطّلاع
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -337,7 +395,7 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* مربع حوار الإضافة/التعديل */}
+      {/* مربع حوار إضافة/تعديل المستخدم */}
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}
@@ -428,56 +486,54 @@ export default function UsersPage() {
               </select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="user-unit">
-                {formData.role === "planning_section"
-                  ? "قسم التخطيط"
-                  : formData.role === "statistics_admin"
-                  ? "قسم الإحصاء"
-                  : "قسم العمل"}
-              </Label>
-              <select
-                id="user-unit"
-                value={formData.unit?.toString() || ""}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    unit: e.target.value ? parseInt(e.target.value) : undefined,
-                  }))
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
-                dir="rtl"
-                disabled={filteredUnitsForForm.length === 0}
-              >
-                <option value="">
-                  {filteredUnitsForForm.length === 0
-                    ? "لا توجد أقسام متاحة لهذا الدور"
-                    : "-- اختر --"}
-                </option>
-                {filteredUnitsForForm.map((unit: OrganizationUnit) => (
-                  <option key={unit.id} value={unit.id.toString()}>
-                    {formatUnitLabel(unit)}
+            {formData.role !== "viewer" && formData.role !== "statistics_admin" && (
+              <div className="space-y-2">
+                <Label htmlFor="user-unit">
+                  {formData.role === "planning_section"
+                    ? "قسم التخطيط"
+                    : "قسم العمل"}
+                </Label>
+                <select
+                  id="user-unit"
+                  value={formData.unit?.toString() || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      unit: e.target.value ? parseInt(e.target.value) : undefined,
+                    }))
+                  }
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
+                  dir="rtl"
+                  disabled={filteredUnitsForForm.length === 0}
+                >
+                  <option value="">
+                    {filteredUnitsForForm.length === 0
+                      ? "لا توجد أقسام متاحة لهذا الدور"
+                      : "-- اختر --"}
                   </option>
-                ))}
-              </select>
-              {formData.role === "planning_section" && (
-                <div className="bg-blue-50 border border-blue-100 rounded-md p-2 flex items-start gap-2">
-                  <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-blue-700">
-                    مدير التخطيط يُربط بـ <b>قسم تخطيط</b> تحت دائرة أو مديرية،
-                    ونطاقه = كل الأقسام العادية تحت نفس الأب. لإنشاء مدير تخطيط
-                    لدائرة كاملة، أنشئ قسم تخطيط تحت الدائرة مباشرة من صفحة
-                    "الهيكل التنظيمي".
-                  </p>
-                </div>
-              )}
-              {filteredUnitsForForm.length === 0 && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
-                  ⚠️ لا يوجد أي قسم مناسب لهذا الدور. أنشئه من صفحة الهيكل
-                  التنظيمي أولاً.
-                </p>
-              )}
-            </div>
+                  {filteredUnitsForForm.map((unit: OrganizationUnit) => (
+                    <option key={unit.id} value={unit.id.toString()}>
+                      {formatUnitLabel(unit)}
+                    </option>
+                  ))}
+                </select>
+                {formData.role === "planning_section" &&
+                  filteredUnitsForForm.length === 0 && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
+                      ⚠️ لا يوجد قسم تخطيط مُسنَد بعد. أنشئه من صفحة «إدارة
+                      تخصيصات التخطيط» أولاً.
+                    </p>
+                  )}
+              </div>
+            )}
+
+            {formData.role === "viewer" && (
+              <div className="bg-blue-50 border border-blue-100 rounded-md p-3 text-xs text-blue-700">
+                <strong>دور المُطّلِع:</strong> قراءة فقط — لا يستطيع الإرسال أو
+                الاعتماد أو التعديل. بعد إنشاء المستخدم، حدّد نطاق اطّلاعه من
+                زر «نطاق الاطّلاع».
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -496,6 +552,89 @@ export default function UsersPage() {
                 : "إضافة المستخدم"}
             </Button>
             <Button variant="outline" onClick={closeDialog}>
+              إلغاء
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* مربع حوار نطاق الاطّلاع */}
+      <Dialog
+        open={viewScopeUserId !== null}
+        onOpenChange={(open) => {
+          if (!open) closeScopeDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>تحديد نطاق الاطّلاع</DialogTitle>
+            <DialogDescription>
+              اختر الوحدات التي يمكن لهذا المستخدم الاطّلاع على منجزاتها (دون
+              التحكّم بها).
+            </DialogDescription>
+          </DialogHeader>
+
+          {scopeError && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{scopeError}</p>
+            </div>
+          )}
+
+          <div className="space-y-2 py-2 max-h-80 overflow-y-auto border rounded-md p-3">
+            {units
+              .filter((u: OrganizationUnit) => u.unit_type === "qism" && u.is_active)
+              .map((u: OrganizationUnit) => (
+                <label
+                  key={u.id}
+                  className="flex items-center gap-2 text-sm hover:bg-gray-50 px-2 py-1 rounded cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={viewScopeUnits.includes(u.id)}
+                    onChange={() => toggleScopeUnit(u.id)}
+                    className="rounded"
+                  />
+                  <span className="flex-1">{u.name}</span>
+                  <span className="text-xs text-gray-400">
+                    {u.parent_name || "—"}
+                  </span>
+                </label>
+              ))}
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (!viewScopeUserId) return;
+                scopeSaveMutation.mutate({
+                  id: existingScopeId,
+                  user: viewScopeUserId,
+                  viewable_units: viewScopeUnits,
+                });
+              }}
+              disabled={scopeSaveMutation.isPending}
+            >
+              {scopeSaveMutation.isPending ? "جارٍ الحفظ..." : "حفظ"}
+            </Button>
+            {existingScopeId && (
+              <Button
+                variant="outline"
+                className="text-red-600"
+                onClick={() => {
+                  if (
+                    existingScopeId &&
+                    confirm("حذف نطاق الاطّلاع لهذا المستخدم؟")
+                  ) {
+                    scopeDeleteMutation.mutate(existingScopeId);
+                  }
+                }}
+                disabled={scopeDeleteMutation.isPending}
+              >
+                حذف النطاق
+              </Button>
+            )}
+            <Button variant="outline" onClick={closeScopeDialog}>
               إلغاء
             </Button>
           </DialogFooter>

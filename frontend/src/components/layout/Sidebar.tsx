@@ -78,6 +78,13 @@ const sidebarItemsByRole: Record<UserRole, SidebarItem[]> = {
     { label: "سجل المنجزات", href: "/history", icon: History },
     { label: "الإشعارات", href: "/notifications", icon: Bell },
   ],
+  // viewer = قراءة فقط. لا تقديم، لا اعتماد، لا مستخدمون. الاطّلاع يتمّ عبر
+  // لوحة التحكم والتقارير (محصور بـ ViewScope من الـ backend).
+  viewer: [
+    { label: "لوحة التحكم", href: "/dashboard", icon: LayoutDashboard },
+    { label: "التقارير", href: "/reports", icon: FileText },
+    { label: "الإشعارات", href: "/notifications", icon: Bell },
+  ],
 };
 
 export function Sidebar() {

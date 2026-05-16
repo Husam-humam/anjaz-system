@@ -223,7 +223,11 @@ export interface Notification {
   created_at: string;
 }
 
-export type UserRole = "statistics_admin" | "planning_section" | "section_manager";
+export type UserRole =
+  | "statistics_admin"
+  | "planning_section"
+  | "section_manager"
+  | "viewer";
 
 export interface User {
   id: number;

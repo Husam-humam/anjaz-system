@@ -40,7 +40,8 @@
 ### Statistics Admin Only
 | Route | Page | Description |
 |---|---|---|
-| `/organization` | الهيكل التنظيمي | Interactive tree view |
+| `/organization` | الهيكل التنظيمي | Read-only tree view from external system + **auto-sync on page open** + manual "Sync now" button |
+| `/organization/assignments` | تخصيصات أقسام التخطيط | **NEW (Phase G)**: manage `PlanningAssignment` + `SupervisedUnit` — assign which qism acts as planning, manage supervised units |
 | `/indicators` | بنك المؤشرات | List + manage indicators (+ categories tab) |
 | `/users` | إدارة المستخدمين | List + create + edit users |
 | `/periods` | الأسابيع | List weeks, open/close, compliance + extensions |
@@ -63,6 +64,15 @@
 | `/submission` | تقديم المنجز الأسبوعي | Current week's form. `returned_by_admin` is editable always (deadline bypass) |
 | `/history` | سجل المنجزات | Past submissions + charts + audit log per submission |
 | `/reports` | تقارير قسمي | Own section analytics |
+
+### Viewer (Phase G+)
+دور قراءة فقط — كل أزرار الإجراءات مُخفيّة عبر `usePermissions().canAct()`، والـ backend يفرض ذلك بصلاحيّة `IsNotViewer`.
+
+| Route | Page | Description |
+|---|---|---|
+| `/dashboard` | لوحة التحكم | Read-only summary stats |
+| `/reports` | التقارير | Reports scoped to `ViewScope.viewable_units` |
+| `/notifications` | الإشعارات | Personal notifications |
 
 ---
 
@@ -166,23 +176,35 @@
 
 ### 3.4 Organization Tree (`/organization`)
 
-Interactive tree with expand/collapse. Each node shows:
-- Icon (building/office/person based on type)
-- Name + code
-- Active/inactive badge
-- Quick actions (edit, add child, deactivate)
+**Read-only tree view** — source of truth is the external organization system.
+
+- **Auto-sync on mount**: on every page visit (admin only), the page automatically `POST /api/organization/units/sync/` and updates the tree in-place. A status banner shows the result (created/updated/deactivated counts) or any error.
+- Manual **"مزامنة الآن"** button retriggers sync on demand.
+- Admin sees a **"إدارة تخصيصات التخطيط"** button linking to `/organization/assignments` (Phase G).
+- No edit/add/deactivate buttons — units are owned by the external system.
+- Qism badges are derived from explicit assignments (Phase F+):
+  - `is_planning=true` → orange badge "تخطيط"
+  - `is_supervised=true` → teal badge "مُشرَف عليه"
+  - neither → gray badge "غير مُسنَد"
 
 ```
-🏛 دائرة الشؤون الإدارية (ADMIN)          [+ إضافة] [✏]
-  ├─ 🏢 مديرية الموارد البشرية (HR)        [+ إضافة] [✏]
-  │    ├─ 👥 قسم التوظيف (EMP)                       [✏]
-  │    ├─ 📋 قسم التخطيط (PLAN) [تخطيط]              [✏]
-  │    └─ 👥 قسم التدريب (TRAIN)                      [✏]
-  └─ 👥 قسم الأرشيف (ARCH)                           [✏]
-🏢 مديرية التخطيط والمتابعة (PLANNING) [مستقلة]
-  ├─ 📊 قسم الإحصاء (STAT) [إحصاء]                  [✏]
-  └─ 👥 قسم المتابعة (FOLLOW)                        [✏]
+🏛 دائرة الشؤون الإدارية (ADMIN)
+  ├─ 🏢 مديرية الموارد البشرية (HR)
+  │    ├─ 👥 قسم التوظيف (EMP)        [مُشرَف عليه]
+  │    ├─ 📋 قسم التخطيط (PLAN)        [تخطيط]
+  │    └─ 👥 قسم التدريب (TRAIN)       [مُشرَف عليه]
+  └─ 👥 قسم الأرشيف (ARCH)            [غير مُسنَد]
 ```
+
+### 3.4.b Planning Assignments (`/organization/assignments`) — Phase G
+
+Admin-only. Manages `PlanningAssignment` rows + their `SupervisedUnit` children.
+
+- Grid of cards — each card = one planning assignment.
+- Card shows: planning unit name + context_parent + list of supervised units.
+- Actions per card: **"إدارة الأقسام المُشرَف عليها"** (modal to add/remove supervised qisms) and **"حذف"**.
+- Top-right button **"تخصيص قسم تخطيط جديد"** opens a dialog to pick any non-assigned qism + optional context_parent.
+- Conflict guard: dropdown of "available supervised qisms" filters out those already supervised (OneToOne `SupervisedUnit.unit`).
 
 ---
 
@@ -354,6 +376,13 @@ Sidebar items are role-filtered. Active item highlighted.
 📝 تقديم المنجز   (badge: if deadline near)
 📁 سجل المنجزات
 📈 تقارير قسمي
+🔔 الإشعارات
+```
+
+**Viewer sidebar (Phase G+):**
+```
+📊 لوحة التحكم
+📈 التقارير
 🔔 الإشعارات
 ```
 

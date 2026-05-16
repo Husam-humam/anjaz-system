@@ -239,7 +239,7 @@ export function useBuildHierarchy<T extends { qism_id: number }>(
       const stack: OrganizationUnit[] = [...(childrenByParent.get(unit.id) || [])];
       while (stack.length > 0) {
         const node = stack.pop()!;
-        if (node.unit_type === "qism" && node.qism_role === "regular") {
+        if (node.unit_type === "qism" && !node.is_planning) {
           result.push(node.id);
         }
         const children = childrenByParent.get(node.id) || [];
@@ -250,8 +250,8 @@ export function useBuildHierarchy<T extends { qism_id: number }>(
 
     const buildNode = (unit: OrganizationUnit): TreeNodeData | null => {
       if (!unit.is_active) return null;
-      // استثناء الأقسام الخاصة (تخطيط/إحصاء)
-      if (unit.unit_type === "qism" && unit.qism_role !== "regular") {
+      // استثناء أقسام التخطيط (لا تُرسل منجزات)
+      if (unit.unit_type === "qism" && unit.is_planning) {
         return null;
       }
 

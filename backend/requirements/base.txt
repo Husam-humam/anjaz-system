@@ -15,3 +15,5 @@ arabic-reshaper>=3.0,<4.0
 python-bidi>=0.4,<1.0
 gunicorn>=21.2,<23.0
 whitenoise>=6.6,<7.0
+# مكتبة HTTP — للتواصل مع نظام الهيكل التنظيمي الخارجي
+requests>=2.31,<3.0

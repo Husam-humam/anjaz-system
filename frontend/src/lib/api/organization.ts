@@ -1,6 +1,13 @@
 import apiClient from "./client";
-import type { OrganizationUnit } from "@/types/organization";
+import type {
+  OrganizationUnit,
+  OrganizationSyncReport,
+  PlanningAssignment,
+  ViewScope,
+} from "@/types/organization";
 import type { ApiResponse } from "@/types/api";
+
+// ─── وحدات الهيكل التنظيمي ───────────────────────
 
 export async function getOrganizationTree(): Promise<OrganizationUnit[]> {
   const { data } = await apiClient.get<OrganizationUnit[]>("/organization/units/tree/");
@@ -29,4 +36,126 @@ export async function updateOrganizationUnit(id: number, unitData: Partial<Organ
 
 export async function deleteOrganizationUnit(id: number): Promise<void> {
   await apiClient.delete(`/organization/units/${id}/`);
+}
+
+/** المزامنة من النظام الخارجي — للأدمن فقط. */
+export async function syncOrganizationFromExternal(
+  dryRun: boolean = false,
+): Promise<OrganizationSyncReport> {
+  const { data } = await apiClient.post<OrganizationSyncReport>(
+    "/organization/units/sync/",
+    null,
+    { params: dryRun ? { dry_run: "1" } : undefined },
+  );
+  return data;
+}
+
+// ─── تخصيصات أقسام التخطيط ───────────────────────
+
+export async function getPlanningAssignments(
+  params?: Record<string, string>,
+): Promise<ApiResponse<PlanningAssignment>> {
+  const { data } = await apiClient.get<ApiResponse<PlanningAssignment>>(
+    "/organization/planning-assignments/",
+    { params },
+  );
+  return data;
+}
+
+export async function getPlanningAssignment(id: number): Promise<PlanningAssignment> {
+  const { data } = await apiClient.get<PlanningAssignment>(
+    `/organization/planning-assignments/${id}/`,
+  );
+  return data;
+}
+
+export async function createPlanningAssignment(payload: {
+  planning_unit: number;
+  context_parent?: number | null;
+  notes?: string;
+}): Promise<PlanningAssignment> {
+  const { data } = await apiClient.post<PlanningAssignment>(
+    "/organization/planning-assignments/",
+    payload,
+  );
+  return data;
+}
+
+export async function updatePlanningAssignment(
+  id: number,
+  payload: Partial<{ context_parent: number | null; notes: string }>,
+): Promise<PlanningAssignment> {
+  const { data } = await apiClient.patch<PlanningAssignment>(
+    `/organization/planning-assignments/${id}/`,
+    payload,
+  );
+  return data;
+}
+
+export async function deletePlanningAssignment(id: number): Promise<void> {
+  await apiClient.delete(`/organization/planning-assignments/${id}/`);
+}
+
+export async function addSupervisedUnit(
+  assignmentId: number,
+  unitId: number,
+): Promise<{ id: number; unit: number; unit_name: string; unit_code: string }> {
+  const { data } = await apiClient.post(
+    `/organization/planning-assignments/${assignmentId}/supervised-units/`,
+    { unit: unitId },
+  );
+  return data;
+}
+
+export async function removeSupervisedUnit(
+  assignmentId: number,
+  unitId: number,
+): Promise<void> {
+  await apiClient.delete(
+    `/organization/planning-assignments/${assignmentId}/supervised-units/${unitId}/`,
+  );
+}
+
+// ─── نطاقات الاطّلاع ─────────────────────────────
+
+export async function getViewScopes(
+  params?: Record<string, string>,
+): Promise<ApiResponse<ViewScope>> {
+  const { data } = await apiClient.get<ApiResponse<ViewScope>>(
+    "/organization/view-scopes/",
+    { params },
+  );
+  return data;
+}
+
+export async function getViewScopeForUser(userId: number): Promise<ViewScope | null> {
+  const result = await getViewScopes({ user: String(userId) });
+  return result.results[0] ?? null;
+}
+
+export async function upsertViewScope(payload: {
+  id?: number;
+  user: number;
+  viewable_units: number[];
+  notes?: string;
+}): Promise<ViewScope> {
+  if (payload.id) {
+    const { data } = await apiClient.patch<ViewScope>(
+      `/organization/view-scopes/${payload.id}/`,
+      {
+        viewable_units: payload.viewable_units,
+        notes: payload.notes ?? "",
+      },
+    );
+    return data;
+  }
+  const { data } = await apiClient.post<ViewScope>(
+    "/organization/view-scopes/",
+    payload,
+  );
+  return data;
+}
+
+export async function deleteViewScope(id: number): Promise<void> {
+  await apiClient.delete(`/organization/view-scopes/${id}/`);
 }

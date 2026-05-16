@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import OrganizationUnit
+
+from .models import OrganizationUnit, PlanningAssignment, SupervisedUnit, ViewScope
 
 
 class OrganizationUnitSerializer(serializers.ModelSerializer):
@@ -59,3 +60,84 @@ class OrganizationTreeSerializer(serializers.ModelSerializer):
 
     def get_is_supervised(self, obj):
         return hasattr(obj, 'supervisor_link')
+
+
+# ═══════════════════════════════════════════════════════════════
+# Serializers لتخصيصات التخطيط و نطاقات الاطّلاع
+# ═══════════════════════════════════════════════════════════════
+
+class SupervisedUnitNestedSerializer(serializers.ModelSerializer):
+    """قسم مُشرَف عليه — تمثيل مُبسَّط داخل PlanningAssignment."""
+    unit_name = serializers.CharField(source='unit.name', read_only=True)
+    unit_code = serializers.CharField(source='unit.code', read_only=True)
+
+    class Meta:
+        model = SupervisedUnit
+        fields = ['id', 'unit', 'unit_name', 'unit_code', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class PlanningAssignmentSerializer(serializers.ModelSerializer):
+    """قراءة تخصيص قسم تخطيط مع الأقسام المُشرَف عليها."""
+    planning_unit_name = serializers.CharField(source='planning_unit.name', read_only=True)
+    planning_unit_code = serializers.CharField(source='planning_unit.code', read_only=True)
+    context_parent_name = serializers.CharField(
+        source='context_parent.name', read_only=True, default=None,
+    )
+    supervised_units = SupervisedUnitNestedSerializer(many=True, read_only=True)
+    created_by_name = serializers.CharField(
+        source='created_by.full_name', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = PlanningAssignment
+        fields = [
+            'id', 'planning_unit', 'planning_unit_name', 'planning_unit_code',
+            'context_parent', 'context_parent_name',
+            'supervised_units', 'notes',
+            'created_at', 'updated_at', 'created_by', 'created_by_name',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+
+class PlanningAssignmentWriteSerializer(serializers.ModelSerializer):
+    """كتابة تخصيص قسم تخطيط (إنشاء/تعديل)."""
+
+    class Meta:
+        model = PlanningAssignment
+        fields = ['planning_unit', 'context_parent', 'notes']
+
+    def validate_planning_unit(self, value):
+        # عند الإنشاء: نمنع تكرار التخصيص (OneToOne على مستوى الـ DB لكن نُعطي
+        # رسالة عربيّة أوضح).
+        if self.instance is None and hasattr(value, 'planning_assignment'):
+            raise serializers.ValidationError(
+                'هذه الوحدة لديها تخصيص قسم تخطيط بالفعل.'
+            )
+        return value
+
+
+class ViewScopeSerializer(serializers.ModelSerializer):
+    """قراءة نطاق اطّلاع مع تفاصيل المستخدم والوحدات."""
+    user_full_name = serializers.CharField(source='user.full_name', read_only=True)
+    user_role = serializers.CharField(source='user.role', read_only=True)
+    viewable_units_detail = OrganizationUnitSerializer(
+        source='viewable_units', many=True, read_only=True,
+    )
+
+    class Meta:
+        model = ViewScope
+        fields = [
+            'id', 'user', 'user_full_name', 'user_role',
+            'viewable_units', 'viewable_units_detail', 'notes',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ViewScopeWriteSerializer(serializers.ModelSerializer):
+    """كتابة نطاق اطّلاع — يدعم upsert (user OneToOne)."""
+
+    class Meta:
+        model = ViewScope
+        fields = ['user', 'viewable_units', 'notes']

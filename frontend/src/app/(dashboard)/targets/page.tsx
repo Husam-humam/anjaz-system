@@ -314,8 +314,8 @@ export default function TargetsPage() {
   const dairas = dairasData?.results || [];
   const mudiriyas = mudiriyasData?.results || [];
   const qisms = (qismsData?.results || []).filter(
-    // إظهار الأقسام العادية فقط في الـ form (لا الإحصاء/التخطيط)
-    (q: OrganizationUnit) => q.qism_role === "regular"
+    // إظهار الأقسام العادية فقط في الـ form (لا أقسام التخطيط)
+    (q: OrganizationUnit) => !q.is_planning
   );
   const indicators = indicatorsData?.results || [];
   const categories = indicatorCategoriesData?.results || [];

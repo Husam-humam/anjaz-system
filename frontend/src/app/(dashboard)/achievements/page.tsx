@@ -127,7 +127,7 @@ export default function AchievementsPage() {
   const dairas = dairasData?.results ?? [];
   const mudiriyas = mudiriyasData?.results ?? [];
   const qisms = (qismsData?.results ?? []).filter(
-    (u) => u.qism_role === "regular"
+    (u) => !u.is_planning
   );
 
   // ── النتائج والإحصاء السريع ──
