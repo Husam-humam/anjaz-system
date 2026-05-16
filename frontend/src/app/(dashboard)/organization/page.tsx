@@ -35,12 +35,14 @@ import {
   QISM_ASSIGNMENT_COLORS,
   QISM_ASSIGNMENT_LABELS,
 } from "@/lib/constants";
+import { Input } from "@/components/ui/input";
 import {
   AlertCircle,
   ChevronDown,
   ChevronLeft,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -120,6 +122,24 @@ function collectDescendantQisms(
   for (const child of root.children ?? []) {
     walk(child, root.name);
   }
+  return out;
+}
+
+/** يُسطِّح الشجرة كاملةً إلى قائمة كل الأقسام النشطة مع مسار الأب. */
+function collectAllQisms(
+  nodes: OrganizationUnit[],
+): Array<OrganizationUnit & { parent_path: string | null }> {
+  const out: Array<OrganizationUnit & { parent_path: string | null }> = [];
+  const walk = (node: OrganizationUnit, path: string | null) => {
+    if (node.unit_type === "qism" && node.is_active) {
+      out.push({ ...node, parent_path: path });
+    }
+    if (node.children?.length) {
+      const childPath = path ? `${path} / ${node.name}` : node.name;
+      for (const child of node.children) walk(child, childPath);
+    }
+  };
+  for (const node of nodes) walk(node, null);
   return out;
 }
 
@@ -330,12 +350,12 @@ function QismAssignmentDialog({
   onClose,
 }: QismAssignmentDialogProps) {
   const queryClient = useQueryClient();
-  const [unitToAdd, setUnitToAdd] = useState<number | "">("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   // عند فتح drawer لقسم جديد، نُصفّر حالة الإدخال
   useEffect(() => {
-    setUnitToAdd("");
+    setSearchTerm("");
     setActionError(null);
   }, [qism?.id]);
 
@@ -376,7 +396,7 @@ function QismAssignmentDialog({
     mutationFn: ({ assignmentId, unitId }: { assignmentId: number; unitId: number }) =>
       addSupervisedUnit(assignmentId, unitId),
     onSuccess: () => {
-      setUnitToAdd("");
+      setSearchTerm("");
       setActionError(null);
       invalidateAll();
     },
@@ -404,23 +424,34 @@ function QismAssignmentDialog({
     ? "supervised"
     : "unassigned";
 
-  // الأقسام المتاحة للإشراف = أحفاد parent قسم التخطيط (أي ضمن نفس فرع الشجرة)
-  // غير مُسنَدة كتخطيط ولا مُشرَف عليها بالفعل. الـ planning_unit نفسه يُستثنى تلقائياً
-  // لأن نقطة الانطلاق هي parent (وlik collectDescendantQisms يستبعد الجذر نفسه).
+  // الأقسام المتاحة للإشراف = كل أقسام المؤسسة النشطة غير المُسنَدة كتخطيط
+  // ولا المُشرَف عليها بالفعل. لا نُقيّد بالفرع — يستخدم الأدمن البحث للوصول.
   const planningUnitIds = new Set(assignments.map((a) => a.planning_unit));
   const supervisedUnitIds = new Set(
     assignments.flatMap((a) => a.supervised_units.map((s) => s.unit)),
   );
 
-  const parentNode = qism.parent != null ? findNode(tree, qism.parent) : null;
-  const branchQisms = parentNode ? collectDescendantQisms(parentNode) : [];
+  // نُسطّح الشجرة كاملةً مع مسار الأب لكل قسم (يُساعد البحث على إيجاد الأقسام
+  // بنفس الاسم في مديريّات مختلفة).
+  const allQisms = collectAllQisms(tree);
 
-  const availableForSupervision = branchQisms.filter(
+  const availableForSupervision = allQisms.filter(
     (u) =>
       u.id !== qism.id &&
       !planningUnitIds.has(u.id) &&
       !supervisedUnitIds.has(u.id),
   );
+
+  // تطبيق بحث المستخدم
+  const term = searchTerm.trim().toLowerCase();
+  const filteredAvailable = term
+    ? availableForSupervision.filter(
+        (u) =>
+          u.name.toLowerCase().includes(term) ||
+          u.code.toLowerCase().includes(term) ||
+          (u.parent_path?.toLowerCase().includes(term) ?? false),
+      )
+    : availableForSupervision;
 
   return (
     <Dialog open={!!qism} onOpenChange={(open) => !open && onClose()}>
@@ -504,53 +535,78 @@ function QismAssignmentDialog({
               </span>
             </div>
 
-            {/* صندوق إضافة قسم */}
+            {/* صندوق إضافة قسم بالبحث */}
             <div className="space-y-2">
               <Label className="text-sm font-semibold">
                 إضافة قسم تحت إشرافه
               </Label>
               <p className="text-xs text-gray-500">
-                تُعرض فقط الأقسام ضمن فرع{" "}
-                <span className="font-semibold">
-                  {qism.parent_name ?? "نفس الجذر"}
-                </span>
-                .
+                ابحث باسم القسم أو المديرية أو الرمز، ثم اضغط على القسم لإضافته.
               </p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <select
-                  value={unitToAdd}
-                  onChange={(e) =>
-                    setUnitToAdd(e.target.value ? Number(e.target.value) : "")
-                  }
-                  className="flex-1 min-w-0 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-right truncate"
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="ابحث عن قسم..."
+                  className="pr-10"
                   dir="rtl"
-                  disabled={availableForSupervision.length === 0}
-                >
-                  <option value="">
-                    {availableForSupervision.length === 0
-                      ? "لا توجد أقسام متاحة ضمن هذا الفرع"
-                      : "-- اختر قسماً --"}
-                  </option>
-                  {availableForSupervision.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.parent_path ? `${u.name} — ${u.parent_path}` : u.name}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  onClick={() => {
-                    if (!unitToAdd) return;
-                    addSupervisedMutation.mutate({
-                      assignmentId: planningAssignment.id,
-                      unitId: Number(unitToAdd),
-                    });
-                  }}
-                  disabled={!unitToAdd || addSupervisedMutation.isPending}
-                  className="sm:w-auto w-full"
-                >
-                  <Plus className="w-4 h-4 ml-1" />
-                  إضافة
-                </Button>
+                />
+              </div>
+
+              {/* لائحة النتائج */}
+              <div className="border rounded-lg overflow-hidden bg-white">
+                {availableForSupervision.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    كل الأقسام في المؤسسة إمّا أقسام تخطيط أو تحت إشراف بالفعل.
+                  </p>
+                ) : filteredAvailable.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    لا توجد نتائج مطابقة لـ «{searchTerm}»
+                  </p>
+                ) : (
+                  <>
+                    <div className="text-xs text-gray-500 px-3 py-1.5 bg-gray-50 border-b">
+                      {term
+                        ? `${filteredAvailable.length} من ${availableForSupervision.length} قسماً مطابقاً`
+                        : `${availableForSupervision.length} قسماً متاحاً`}
+                    </div>
+                    <ul className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                      {filteredAvailable.slice(0, 100).map((u) => (
+                        <li key={u.id}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              addSupervisedMutation.mutate({
+                                assignmentId: planningAssignment.id,
+                                unitId: u.id,
+                              })
+                            }
+                            disabled={addSupervisedMutation.isPending}
+                            className="w-full text-right px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center justify-between gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm text-gray-900 truncate">
+                                {u.name}
+                              </p>
+                              <p className="text-xs text-gray-400 truncate">
+                                {u.parent_path ?? "—"}
+                                <span className="mx-1.5">•</span>
+                                <span className="font-mono">{u.code}</span>
+                              </p>
+                            </div>
+                            <Plus className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {filteredAvailable.length > 100 && (
+                      <div className="text-xs text-gray-500 px-3 py-1.5 bg-gray-50 border-t text-center">
+                        تم عرض أول 100 نتيجة — قلِّص البحث للوصول إلى المزيد.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
