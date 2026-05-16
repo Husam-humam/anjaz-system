@@ -72,6 +72,9 @@ export default function FormsPage() {
   const [indicatorCategoryFilter, setIndicatorCategoryFilter] = useState("");
   const [indicatorSearchQuery, setIndicatorSearchQuery] = useState("");
 
+  // أخطاء الإجراءات (إرسال، إنشاء إصدار)
+  const [actionError, setActionError] = useState<string | null>(null);
+
   // ─── حالات الفلاتر ───
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -136,6 +139,9 @@ export default function FormsPage() {
       queryClient.invalidateQueries({ queryKey: ["form-templates"] });
       closeCreateDialog();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر createMutation.error
+    },
   });
 
   const updateMutation = useMutation({
@@ -150,12 +156,21 @@ export default function FormsPage() {
       queryClient.invalidateQueries({ queryKey: ["form-templates"] });
       closeCreateDialog();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر updateMutation.error
+    },
   });
 
   const submitMutation = useMutation({
     mutationFn: (id: number) => submitFormTemplate(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["form-templates"] });
+      setSubmitConfirmOpen(false);
+      setSubmittingId(null);
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
       setSubmitConfirmOpen(false);
       setSubmittingId(null);
     },
@@ -165,6 +180,12 @@ export default function FormsPage() {
     mutationFn: (id: number) => createNewVersion(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["form-templates"] });
+      setNewVersionConfirmOpen(false);
+      setVersioningId(null);
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
       setNewVersionConfirmOpen(false);
       setVersioningId(null);
     },
@@ -188,6 +209,9 @@ export default function FormsPage() {
       setEffectiveWeek("");
       setEffectiveYear(new Date().getFullYear().toString());
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر approveMutation.error
+    },
   });
 
   const rejectMutation = useMutation({
@@ -202,7 +226,44 @@ export default function FormsPage() {
       setActionTemplateId(null);
       setRejectReason("");
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر rejectMutation.error
+    },
   });
+
+  // مساعدات إغلاق الحوارات مع إعادة ضبط الحالة
+  const closeApproveDialog = (open: boolean) => {
+    setApproveDialogOpen(open);
+    if (!open) {
+      setActionTemplateId(null);
+      setEffectiveWeek("");
+      setEffectiveYear(new Date().getFullYear().toString());
+      approveMutation.reset();
+    }
+  };
+
+  const closeRejectDialog = (open: boolean) => {
+    setRejectDialogOpen(open);
+    if (!open) {
+      setActionTemplateId(null);
+      setRejectReason("");
+      rejectMutation.reset();
+    }
+  };
+
+  const closeSubmitConfirm = (open: boolean) => {
+    setSubmitConfirmOpen(open);
+    if (!open) {
+      setSubmittingId(null);
+    }
+  };
+
+  const closeNewVersionConfirm = (open: boolean) => {
+    setNewVersionConfirmOpen(open);
+    if (!open) {
+      setVersioningId(null);
+    }
+  };
 
   const closeCreateDialog = () => {
     setCreateDialogOpen(false);
@@ -421,6 +482,21 @@ export default function FormsPage() {
           </Button>
         )}
       </div>
+
+      {/* بانر أخطاء الإجراءات (إرسال، إصدار جديد) */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* شريط تنبيه: قوالب بانتظار الاعتماد */}
       {canManageTemplates && pendingTemplatesCount > 0 && (
@@ -936,7 +1012,7 @@ export default function FormsPage() {
       {/* تأكيد الإرسال */}
       <ConfirmDialog
         open={submitConfirmOpen}
-        onOpenChange={setSubmitConfirmOpen}
+        onOpenChange={closeSubmitConfirm}
         title="إرسال الاستمارة للاعتماد"
         description="هل أنت متأكد من إرسال هذه الاستمارة للاعتماد؟ لن تتمكن من التعديل بعد الإرسال."
         confirmLabel="إرسال"
@@ -945,7 +1021,7 @@ export default function FormsPage() {
       />
 
       {/* مربع حوار الاعتماد */}
-      <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
+      <Dialog open={approveDialogOpen} onOpenChange={closeApproveDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>اعتماد الاستمارة</DialogTitle>
@@ -1003,7 +1079,7 @@ export default function FormsPage() {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setApproveDialogOpen(false)}
+              onClick={() => closeApproveDialog(false)}
             >
               إلغاء
             </Button>
@@ -1012,7 +1088,7 @@ export default function FormsPage() {
       </Dialog>
 
       {/* مربع حوار الرفض */}
-      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+      <Dialog open={rejectDialogOpen} onOpenChange={closeRejectDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>رفض الاستمارة</DialogTitle>
@@ -1054,7 +1130,7 @@ export default function FormsPage() {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setRejectDialogOpen(false)}
+              onClick={() => closeRejectDialog(false)}
             >
               إلغاء
             </Button>
@@ -1065,7 +1141,7 @@ export default function FormsPage() {
       {/* تأكيد إنشاء إصدار جديد */}
       <ConfirmDialog
         open={newVersionConfirmOpen}
-        onOpenChange={setNewVersionConfirmOpen}
+        onOpenChange={closeNewVersionConfirm}
         title="إنشاء إصدار جديد"
         description="سيتم إنشاء نسخة جديدة (مسودة) من هذه الاستمارة بكامل بنودها. تستطيع تعديلها ثم تقديمها للاعتماد. الإصدار الحالي يبقى ساري المفعول حتى يُعتمد الجديد. هل تريد المتابعة؟"
         confirmLabel="إنشاء إصدار جديد"

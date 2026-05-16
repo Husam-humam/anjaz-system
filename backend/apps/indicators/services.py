@@ -1,6 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from apps.audit.models import AuditLog
+from apps.audit.services import AuditService
+
 from .models import Indicator, IndicatorCategory
 
 
@@ -14,6 +17,19 @@ class IndicatorService:
         indicator.created_by = created_by
         indicator.full_clean()
         indicator.save()
+
+        # سجل التدقيق — قاعدة عمل #14
+        AuditService.log(
+            action_type=AuditLog.ActionType.INDICATOR_CREATED,
+            actor=created_by,
+            target=indicator,
+            qism=None,
+            metadata={
+                'name': indicator.name,
+                'unit_type': indicator.unit_type,
+                'accumulation_type': indicator.accumulation_type,
+            },
+        )
         return indicator
 
     # الحقول الحسّاسة التي تُغيِّر سلوك aggregation التاريخي للمؤشر.
@@ -21,7 +37,7 @@ class IndicatorService:
     LOCKED_FIELDS_AFTER_ANSWERS = ('unit_type', 'accumulation_type')
 
     @staticmethod
-    def update_indicator(indicator, data):
+    def update_indicator(indicator, data, actor=None):
         """
         تحديث مؤشر.
         - `unit_type` و `accumulation_type` مقفلان إذا وُجدت إجابات تستند للمؤشر،
@@ -43,15 +59,31 @@ class IndicatorService:
                     'إجابات سابقة لأنه يُبطل صحّة التقارير التاريخية.'
                 )
 
+        # نلتقط الحقول المُتغيّرة قبل التحديث
+        changes = {}
         for key, value in data.items():
+            old = getattr(indicator, key, None)
+            old_repr = old.pk if hasattr(old, 'pk') else old
+            new_repr = value.pk if hasattr(value, 'pk') else value
+            if old_repr != new_repr:
+                changes[key] = {'old': old_repr, 'new': new_repr}
             setattr(indicator, key, value)
         indicator.full_clean()
         indicator.save()
+
+        if actor is not None and changes:
+            AuditService.log(
+                action_type=AuditLog.ActionType.INDICATOR_UPDATED,
+                actor=actor,
+                target=indicator,
+                qism=None,
+                metadata={'name': indicator.name, 'changes': changes},
+            )
         return indicator
 
     @staticmethod
     @transaction.atomic
-    def deactivate_indicator(indicator):
+    def deactivate_indicator(indicator, actor=None):
         """تعطيل مؤشر (حذف ناعم)"""
         # التحقق من عدم استخدام المؤشر في استمارات نشطة
         from apps.forms.models import FormTemplateItem
@@ -65,6 +97,15 @@ class IndicatorService:
             )
         indicator.is_active = False
         indicator.save(update_fields=['is_active'])
+
+        if actor is not None:
+            AuditService.log(
+                action_type=AuditLog.ActionType.INDICATOR_DEACTIVATED,
+                actor=actor,
+                target=indicator,
+                qism=None,
+                metadata={'name': indicator.name},
+            )
         return indicator
 
 

@@ -92,7 +92,9 @@ class OrganizationSyncService:
     ):
         self.client = client or ExternalOrgClient()
         # نُحمِّل الـ mapping من DB عند البَدء — يضمن أحدث القرارات من الأدمن.
-        # المُختبَرون يستطيعون تمرير override يدوي.
+        # المُختبَرون يستطيعون تمرير override يدوي، وفي تلك الحالة لا نُحدّث
+        # الخريطة آلياً من DB أثناء sync (وإلا فقد التحكّم).
+        self._explicit_map = unit_type_map is not None
         self.unit_type_map: dict[str, str | None] = (
             unit_type_map
             if unit_type_map is not None
@@ -163,7 +165,8 @@ class OrganizationSyncService:
 
         # 0) ضمان وجود سطر mapping لكل نوع خارجي + إعادة تحميل الخريطة
         #    (في dry_run لا نكتب، فنكتفي بالخريطة المُحمَّلة في __init__).
-        if not dry_run:
+        #    وأيضاً نتخطّى لو المُختبِر مرّر map صريح (override).
+        if not dry_run and not self._explicit_map:
             try:
                 self.refresh_unit_type_mappings()
                 self.unit_type_map = self._load_unit_type_map_from_db()

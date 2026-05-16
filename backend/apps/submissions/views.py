@@ -1020,9 +1020,36 @@ class WeeklySubmissionViewSet(viewsets.ModelViewSet):
         submission = self.get_object()
         user = request.user
 
-        # التحقق من الصلاحية
-        allowed_roles = ('section_manager', 'planning_section', 'statistics_admin')
-        if user.role not in allowed_roles:
+        # فحص النطاق حسب الدور — لا يُسمح برؤية تاريخ قسم خارج نطاق المستخدم.
+        # الـ get_object() السابق طبّق فلتر الـ queryset، لكن نُكرّر التحقّق
+        # هنا صراحةً (دفاع متعدّد الطبقات + رسائل خطأ أوضح).
+        if user.role == 'statistics_admin':
+            pass  # نطاق كامل
+        elif user.role == 'section_manager':
+            if submission.qism_id != user.unit_id:
+                return Response(
+                    {
+                        'error': True,
+                        'message': 'لا تملك صلاحية الوصول لسجل هذا القسم.',
+                        'code': 'PERMISSION_DENIED',
+                        'details': {},
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif user.role in ('planning_section', 'viewer'):
+            from .services import _user_view_scope_qism_ids
+            scope_ids = _user_view_scope_qism_ids(user)
+            if scope_ids is not None and submission.qism_id not in scope_ids:
+                return Response(
+                    {
+                        'error': True,
+                        'message': 'لا تملك صلاحية الوصول لسجل هذا القسم.',
+                        'code': 'PERMISSION_DENIED',
+                        'details': {},
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
             return Response(
                 {
                     'error': True,

@@ -47,8 +47,8 @@ class IndicatorViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         IndicatorService.update_indicator(
-            self.get_object(), serializer.validated_data
+            self.get_object(), serializer.validated_data, actor=self.request.user,
         )
 
     def perform_destroy(self, instance):
-        IndicatorService.deactivate_indicator(instance)
+        IndicatorService.deactivate_indicator(instance, actor=self.request.user)

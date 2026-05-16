@@ -59,6 +59,7 @@ export default function UsersPage() {
   const [viewScopeUnits, setViewScopeUnits] = useState<number[]>([]);
   const [existingScopeId, setExistingScopeId] = useState<number | undefined>();
   const [scopeError, setScopeError] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const params: Record<string, string> = {};
   if (search) params.search = search;
@@ -87,6 +88,9 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       closeDialog();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر createMutation.error
+    },
   });
 
   const updateMutation = useMutation({
@@ -95,6 +99,22 @@ export default function UsersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       closeDialog();
+    },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر updateMutation.error
+    },
+  });
+
+  // mutation منفصلة للتفعيل/التعطيل لكي لا تشارك حالة الخطأ مع الحوار
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) =>
+      updateUser(id, { is_active } as Partial<User>),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setToggleError(null);
+    },
+    onError: (err) => {
+      setToggleError(getErrorMessage(err));
     },
   });
 
@@ -118,6 +138,9 @@ export default function UsersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["view-scopes"] });
       closeScopeDialog();
+    },
+    onError: (err) => {
+      setScopeError(getErrorMessage(err));
     },
   });
 
@@ -201,9 +224,9 @@ export default function UsersPage() {
   };
 
   const handleToggleActive = (user: User) => {
-    updateMutation.mutate({
+    toggleActiveMutation.mutate({
       id: user.id,
-      data: { is_active: !user.is_active } as Partial<User>,
+      is_active: !user.is_active,
     });
   };
 
@@ -302,6 +325,21 @@ export default function UsersPage() {
           </select>
         </div>
       </div>
+
+      {/* بانر خطأ تفعيل/تعطيل المستخدم */}
+      {toggleError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{toggleError}</p>
+          <button
+            type="button"
+            onClick={() => setToggleError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         {users.length === 0 ? (

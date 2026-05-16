@@ -215,7 +215,9 @@ class UserViewSet(viewsets.ModelViewSet):
         """تحديث بيانات مستخدم باستخدام طبقة الخدمات"""
         data = serializer.validated_data.copy()
         try:
-            user = UserService.update_user(serializer.instance, data)
+            user = UserService.update_user(
+                serializer.instance, data, actor=self.request.user,
+            )
         except DjangoValidationError as e:
             from rest_framework.exceptions import ValidationError
             raise ValidationError(e.message_dict)
@@ -229,7 +231,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         new_password = serializer.validated_data['new_password']
-        UserService.reset_password(user, new_password)
+        UserService.reset_password(user, new_password, actor=request.user)
 
         return Response(
             {'message': 'تم إعادة تعيين كلمة المرور بنجاح.'},

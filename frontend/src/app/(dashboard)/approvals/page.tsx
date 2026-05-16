@@ -18,7 +18,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { CheckCircle, Eye } from "lucide-react";
+import { AlertCircle, CheckCircle, Eye } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 
 export default function ApprovalsPage() {
   const queryClient = useQueryClient();
@@ -27,6 +28,7 @@ export default function ApprovalsPage() {
     useState<WeeklySubmission | null>(null);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   const [approvingId, setApprovingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const {
     data: submissionsData,
@@ -44,6 +46,10 @@ export default function ApprovalsPage() {
       queryClient.invalidateQueries({ queryKey: ["pending-submissions"] });
       setApproveConfirmOpen(false);
       setApprovingId(null);
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
     },
   });
 
@@ -91,6 +97,21 @@ export default function ApprovalsPage() {
           <span className="text-amber-800 text-sm font-medium">
             يوجد {submissions.length} منجز بانتظار الاعتماد
           </span>
+        </div>
+      )}
+
+      {/* بانر الأخطاء */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -281,7 +302,13 @@ export default function ApprovalsPage() {
       {/* تأكيد الاعتماد */}
       <ConfirmDialog
         open={approveConfirmOpen}
-        onOpenChange={setApproveConfirmOpen}
+        onOpenChange={(open) => {
+          setApproveConfirmOpen(open);
+          if (!open) {
+            setApprovingId(null);
+            setActionError(null);
+          }
+        }}
         title="اعتماد المنجز"
         description="هل أنت متأكد من اعتماد هذا المنجز الأسبوعي؟"
         confirmLabel="اعتماد"

@@ -81,6 +81,9 @@ export default function IndicatorsPage() {
       queryClient.invalidateQueries({ queryKey: ["indicators"] });
       closeDialog();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر createMutation.error
+    },
   });
 
   const updateMutation = useMutation({
@@ -89,6 +92,9 @@ export default function IndicatorsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["indicators"] });
       closeDialog();
+    },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر updateMutation.error
     },
   });
 

@@ -161,6 +161,8 @@ export default function PeriodsPage() {
     end_date: "",
     deadline: "",
   });
+  // خطأ إغلاق الأسبوع — يظهر كبانر فوق الجدول
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   const params: Record<string, string> = {};
   if (yearFilter) params.year = yearFilter;
@@ -188,6 +190,9 @@ export default function PeriodsPage() {
       setDialogOpen(false);
       resetForm();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر createMutation.error
+    },
   });
 
   const closeMutation = useMutation({
@@ -196,8 +201,21 @@ export default function PeriodsPage() {
       queryClient.invalidateQueries({ queryKey: ["periods"] });
       setCloseConfirmOpen(false);
       setClosingPeriodId(null);
+      setCloseError(null);
+    },
+    onError: (err: unknown) => {
+      setCloseError(getErrorMessage(err));
+      setCloseConfirmOpen(false);
+      setClosingPeriodId(null);
     },
   });
+
+  const handleCloseConfirmChange = (open: boolean) => {
+    setCloseConfirmOpen(open);
+    if (!open) {
+      setClosingPeriodId(null);
+    }
+  };
 
   // مسح خطأ الإنشاء عند فتح/إغلاق الـ dialog
   const handleDialogChange = (open: boolean) => {
@@ -314,6 +332,21 @@ export default function PeriodsPage() {
           </div>
         </div>
       </div>
+
+      {/* بانر خطأ إغلاق الأسبوع */}
+      {closeError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{closeError}</p>
+          <button
+            type="button"
+            onClick={() => setCloseError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* فلتر السنة */}
       <div className="bg-white rounded-xl shadow-sm border p-4">
@@ -542,7 +575,7 @@ export default function PeriodsPage() {
       {/* تأكيد الإغلاق */}
       <ConfirmDialog
         open={closeConfirmOpen}
-        onOpenChange={setCloseConfirmOpen}
+        onOpenChange={handleCloseConfirmChange}
         title="إغلاق الأسبوع"
         description="هل أنت متأكد من إغلاق هذا الأسبوع؟ لن يتمكن مدراء الأقسام من تقديم أو تعديل منجزاتهم بعد الإغلاق."
         confirmLabel="إغلاق الأسبوع"

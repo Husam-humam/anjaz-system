@@ -11,9 +11,12 @@ import pytest
 from apps.organization.integrations import ExternalOrgClient
 from apps.organization.models import OrganizationUnit, UnitType
 from apps.organization.sync_service import (
-    DEFAULT_UNIT_TYPE_MAP,
+    DEFAULT_TYPE_SUGGESTIONS,
     OrganizationSyncService,
 )
+
+# اسم قديم — تركناه كـ alias لتسهيل قراءة الاختبارات القديمة
+DEFAULT_UNIT_TYPE_MAP = DEFAULT_TYPE_SUGGESTIONS
 
 
 def make_mock_client(tree=None, flat_pages=None):
@@ -44,7 +47,10 @@ class TestSyncServiceCreate:
             {'id': 100, 'name': 'دائرة أ', 'code': 'D001',
              'unit_type_name': 'دائرة', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync()
 
@@ -75,7 +81,10 @@ class TestSyncServiceCreate:
             {'id': 3, 'name': 'قسم التوظيف', 'code': 'Q1',
              'unit_type_name': 'قسم', 'is_active': True},
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync()
 
@@ -104,7 +113,10 @@ class TestSyncServiceUpdate:
             {'id': 50, 'name': 'اسم جديد', 'code': 'NEW',
              'unit_type_name': 'دائرة', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync()
 
@@ -127,7 +139,10 @@ class TestSyncServiceUpdate:
             {'id': 60, 'name': 'قسم محدَّث', 'code': 'P1',
              'unit_type_name': 'دائرة', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
         service.sync()
 
         existing.refresh_from_db()
@@ -144,7 +159,10 @@ class TestSyncServiceUpdate:
             {'id': 70, 'name': 'ثابت', 'code': 'S1',
              'unit_type_name': 'دائرة', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync()
         # نُعدّ updated فقط عندما يتغيّر شيء فعلاً
@@ -156,22 +174,60 @@ class TestSyncServiceDeactivate:
     """سيناريوهات الـ soft delete (وحدة اختفت من النظام الخارجي)."""
 
     def test_deactivate_disappeared_unit(self):
-        # وحدة كانت تأتي من النظام الخارجي، اختفت الآن (نستخدم daira للتبسيط)
-        existing = OrganizationUnit.objects.create(
+        """
+        وحدة موجودة محلياً اختفت من بين عدّة وحدات في النظام الخارجي → تُعطّل.
+        ملاحظة: استخدمنا أكثر من وحدة في الاستجابة الخارجيّة لتفادي guard
+        «استجابة فارغة» الذي يمنع تعطيل كل الوحدات (كما لو كانت outage).
+        """
+        # وحدة قديمة ستختفي
+        disappearing = OrganizationUnit.objects.create(
             external_id=99, name='دائرة قديمة', code='G1',
             unit_type=UnitType.DAIRA, parent=None, is_active=True,
         )
+        # وحدة ستظلّ موجودة (تمنع guard من رفض المزامنة)
+        OrganizationUnit.objects.create(
+            external_id=100, name='دائرة موجودة', code='G2',
+            unit_type=UnitType.DAIRA, parent=None, is_active=True,
+        )
 
-        # النظام الخارجي لا يحتوي على external_id=99 بعد الآن
+        # الاستجابة تحتوي على external_id=100 فقط (99 اختفى)
+        tree = [{'id': 100, 'name': 'دائرة موجودة', 'children': None}]
+        flat = build_flat([
+            {'id': 100, 'name': 'دائرة موجودة', 'code': 'G2',
+             'unit_type_name': 'دائرة', 'is_active': True},
+        ])
         service = OrganizationSyncService(
-            client=make_mock_client(tree=[], flat_pages=[build_flat([])])
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
         )
 
         report = service.sync()
 
         assert report.deactivated == 1
-        existing.refresh_from_db()
-        assert existing.is_active is False
+        disappearing.refresh_from_db()
+        assert disappearing.is_active is False
+
+    def test_empty_external_response_with_locals_is_rejected(self):
+        """
+        حماية: لو النظام الخارجي رجع استجابة فارغة بينما لدينا وحدات
+        مُزامَنة محلياً، يجب رفض المزامنة (يحتمل أن يكون outage).
+        """
+        OrganizationUnit.objects.create(
+            external_id=99, name='دائرة', code='G1',
+            unit_type=UnitType.DAIRA, parent=None, is_active=True,
+        )
+
+        service = OrganizationSyncService(
+            client=make_mock_client(tree=[], flat_pages=[build_flat([])]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
+
+        report = service.sync()
+
+        # المزامنة رُفضت — لا تعطيل، خطأ في التقرير
+        assert report.deactivated == 0
+        assert len(report.errors) == 1
+        assert 'فارغة' in report.errors[0]
 
     def test_local_only_units_untouched(self):
         """الوحدات اليدوية (external_id IS NULL) لا تُمسّ بالمزامنة."""
@@ -199,7 +255,10 @@ class TestSyncServiceUnknownType:
             {'id': 1, 'name': 'كيان', 'code': 'X',
              'unit_type_name': 'نوع غريب', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync()
 
@@ -218,7 +277,10 @@ class TestSyncServiceDryRun:
             {'id': 1, 'name': 'دائرة', 'code': 'D',
              'unit_type_name': 'دائرة', 'is_active': True}
         ])
-        service = OrganizationSyncService(client=make_mock_client(tree, [flat]))
+        service = OrganizationSyncService(
+            client=make_mock_client(tree, [flat]),
+            unit_type_map=DEFAULT_UNIT_TYPE_MAP,
+        )
 
         report = service.sync(dry_run=True)
 

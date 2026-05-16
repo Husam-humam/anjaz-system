@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getNotifications,
@@ -11,8 +12,8 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
-import { Bell, CheckCheck, Check } from "lucide-react";
+import { formatDateTime, getErrorMessage } from "@/lib/utils";
+import { AlertCircle, Bell, CheckCheck, Check } from "lucide-react";
 
 const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
   submission_submitted: "bg-blue-100 text-blue-600",
@@ -29,6 +30,7 @@ const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
 
 export default function NotificationsPage() {
   const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const {
     data: notificationsData,
@@ -45,6 +47,10 @@ export default function NotificationsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
       queryClient.invalidateQueries({ queryKey: ["unread-count"] });
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
     },
   });
 
@@ -53,6 +59,10 @@ export default function NotificationsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
       queryClient.invalidateQueries({ queryKey: ["unread-count"] });
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
     },
   });
 
@@ -95,6 +105,21 @@ export default function NotificationsPage() {
           </Button>
         )}
       </div>
+
+      {/* بانر الأخطاء */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* قائمة الإشعارات */}
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">

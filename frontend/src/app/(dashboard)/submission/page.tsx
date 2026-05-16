@@ -12,6 +12,8 @@ import {
 } from "@/lib/api/submissions";
 import type { WeeklySubmission, SubmissionAnswer } from "@/types/submissions";
 import { STATUS_LABELS } from "@/lib/constants";
+import { getErrorMessage } from "@/lib/utils";
+import { AlertCircle } from "lucide-react";
 
 export default function SubmissionPage() {
   const user = useAuthStore((s) => s.user);
@@ -19,6 +21,8 @@ export default function SubmissionPage() {
   const [submission, setSubmission] = useState<WeeklySubmission | null>(null);
   const [answers, setAnswers] = useState<Record<number, Partial<SubmissionAnswer>>>({});
   const [showConfirm, setShowConfirm] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // الحصول على الفترة المفتوحة الحالية
   const { data: periodsData, isLoading: periodsLoading } = useQuery({
@@ -40,6 +44,10 @@ export default function SubmissionPage() {
         });
       }
       setAnswers(initialAnswers);
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
     },
   });
 
@@ -58,6 +66,10 @@ export default function SubmissionPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["submissions"] });
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setActionError(getErrorMessage(err));
     },
   });
 
@@ -68,6 +80,11 @@ export default function SubmissionPage() {
       setSubmission(data);
       setShowConfirm(false);
       queryClient.invalidateQueries({ queryKey: ["submissions"] });
+      setSubmitError(null);
+      setActionError(null);
+    },
+    onError: (err: unknown) => {
+      setSubmitError(getErrorMessage(err));
     },
   });
 
@@ -159,8 +176,28 @@ export default function SubmissionPage() {
     );
   }
 
+  const closeConfirm = () => {
+    setShowConfirm(false);
+    setSubmitError(null);
+  };
+
   return (
     <div className="space-y-6">
+      {/* بانر أخطاء الإنشاء/الحفظ */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* معلومات الأسبوع */}
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex items-center justify-between">
@@ -365,12 +402,20 @@ export default function SubmissionPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold mb-2">تأكيد الإرسال</h3>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-4">
               هل أنت متأكد من إرسال المنجز الأسبوعي؟ لن تتمكن من التعديل بعد الإرسال.
             </p>
+            {submitError && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2 mb-4">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700 break-words flex-1">
+                  {submitError}
+                </p>
+              </div>
+            )}
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setShowConfirm(false)}
+                onClick={closeConfirm}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
               >
                 إلغاء

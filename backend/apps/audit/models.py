@@ -72,6 +72,18 @@ class AuditLog(models.Model):
         PERIOD_OPENED = 'period_opened', 'فتح أسبوع'
         PERIOD_CLOSED = 'period_closed', 'إغلاق أسبوع'
 
+        # ─── إدارة المستخدمين ───
+        USER_CREATED = 'user_created', 'إنشاء مستخدم'
+        USER_UPDATED = 'user_updated', 'تعديل بيانات مستخدم'
+        USER_PASSWORD_RESET = 'user_password_reset', 'إعادة تعيين كلمة المرور'
+        USER_DEACTIVATED = 'user_deactivated', 'تعطيل مستخدم'
+        USER_REACTIVATED = 'user_reactivated', 'تفعيل مستخدم'
+
+        # ─── إدارة المؤشّرات ───
+        INDICATOR_CREATED = 'indicator_created', 'إنشاء مؤشّر'
+        INDICATOR_UPDATED = 'indicator_updated', 'تعديل مؤشّر'
+        INDICATOR_DEACTIVATED = 'indicator_deactivated', 'تعطيل مؤشّر'
+
     action_type = models.CharField(
         max_length=50, choices=ActionType.choices, verbose_name='نوع الإجراء'
     )

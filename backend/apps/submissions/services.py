@@ -53,6 +53,19 @@ class WeeklyPeriodService:
         period.full_clean()
         period.save()
 
+        # سجل التدقيق — قاعدة عمل #14
+        AuditService.log(
+            action_type=AuditLog.ActionType.PERIOD_OPENED,
+            actor=created_by,
+            target=period,
+            qism=None,
+            metadata={
+                'year': period.year,
+                'week_number': period.week_number,
+                'deadline': period.deadline.isoformat() if period.deadline else None,
+            },
+        )
+
         # إرسال إشعارات لجميع مديري الأقسام النشطة
         try:
             _notify_period_opened(period)
@@ -94,6 +107,18 @@ class WeeklyPeriodService:
 
         period.status = WeeklyPeriod.Status.CLOSED
         period.save(update_fields=['status'])
+
+        # سجل التدقيق — قاعدة عمل #14
+        AuditService.log(
+            action_type=AuditLog.ActionType.PERIOD_CLOSED,
+            actor=user,
+            target=period,
+            qism=None,
+            metadata={
+                'year': period.year,
+                'week_number': period.week_number,
+            },
+        )
 
         # تعليم المنجزات في حالة DRAFT أو EXTENDED بأنها متأخرة
         WeeklySubmission.objects.filter(

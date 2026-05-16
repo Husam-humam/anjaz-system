@@ -282,12 +282,18 @@ export default function TargetsPage() {
     enabled: !!breakdownTargetId && breakdownOpen,
   });
 
+  // خطأ مستقل لحذف المستهدف (يظهر كبانر فوق الجدول)
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   // ── Mutations ──
   const createMutation = useMutation({
     mutationFn: createTarget,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["targets"] });
       closeDialog();
+    },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر createMutation.error
     },
   });
 
@@ -298,6 +304,9 @@ export default function TargetsPage() {
       queryClient.invalidateQueries({ queryKey: ["targets"] });
       closeDialog();
     },
+    onError: () => {
+      // الخطأ يُعرَض داخل الحوار عبر updateMutation.error
+    },
   });
 
   const deleteMutation = useMutation({
@@ -306,8 +315,21 @@ export default function TargetsPage() {
       queryClient.invalidateQueries({ queryKey: ["targets"] });
       setDeleteConfirmOpen(false);
       setDeletingId(null);
+      setDeleteError(null);
+    },
+    onError: (err: unknown) => {
+      setDeleteError(getErrorMessage(err));
+      setDeleteConfirmOpen(false);
+      setDeletingId(null);
     },
   });
+
+  const closeDeleteConfirm = (open: boolean) => {
+    setDeleteConfirmOpen(open);
+    if (!open) {
+      setDeletingId(null);
+    }
+  };
 
   // ── بيانات مستخرجة ──
   const targets = targetsData?.results || [];
@@ -449,6 +471,21 @@ export default function TargetsPage() {
           إضافة مستهدف
         </Button>
       </div>
+
+      {/* بانر خطأ الحذف */}
+      {deleteError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{deleteError}</p>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* شريط الفلاتر */}
       <div className="bg-white rounded-xl shadow-sm border p-4">
@@ -876,7 +913,7 @@ export default function TargetsPage() {
       {/* تأكيد الحذف */}
       <ConfirmDialog
         open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
+        onOpenChange={closeDeleteConfirm}
         title="حذف المستهدف"
         description="هل أنت متأكد من حذف هذا المستهدف؟ لا يمكن التراجع."
         confirmLabel="حذف"

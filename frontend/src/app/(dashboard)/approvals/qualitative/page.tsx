@@ -24,7 +24,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { CheckCircle, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, XCircle } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 
 interface QualitativeItem extends SubmissionAnswer {
   qism_name?: string;
@@ -37,6 +38,8 @@ export default function QualitativeApprovalsPage() {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [actionId, setActionId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [rejectError, setRejectError] = useState<string | null>(null);
 
   const {
     data: qualitativeData,
@@ -55,6 +58,10 @@ export default function QualitativeApprovalsPage() {
       queryClient.invalidateQueries({ queryKey: ["pending-qualitative"] });
       setApproveConfirmOpen(false);
       setActionId(null);
+      setApproveError(null);
+    },
+    onError: (err: unknown) => {
+      setApproveError(getErrorMessage(err));
     },
   });
 
@@ -66,8 +73,29 @@ export default function QualitativeApprovalsPage() {
       setRejectDialogOpen(false);
       setActionId(null);
       setRejectReason("");
+      setRejectError(null);
+    },
+    onError: (err: unknown) => {
+      setRejectError(getErrorMessage(err));
     },
   });
+
+  const closeRejectDialog = (open: boolean) => {
+    setRejectDialogOpen(open);
+    if (!open) {
+      setRejectReason("");
+      setActionId(null);
+      setRejectError(null);
+    }
+  };
+
+  const closeApproveDialog = (open: boolean) => {
+    setApproveConfirmOpen(open);
+    if (!open) {
+      setActionId(null);
+      setApproveError(null);
+    }
+  };
 
   const handleApproveClick = (id: number) => {
     setActionId(id);
@@ -118,6 +146,21 @@ export default function QualitativeApprovalsPage() {
           <span className="text-amber-800 text-sm font-medium">
             يوجد {items.length} منجز نوعي بانتظار الاعتماد
           </span>
+        </div>
+      )}
+
+      {/* بانر خطأ الاعتماد */}
+      {approveError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700 break-words flex-1">{approveError}</p>
+          <button
+            type="button"
+            onClick={() => setApproveError(null)}
+            className="text-red-500 hover:text-red-700 text-sm"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -201,7 +244,7 @@ export default function QualitativeApprovalsPage() {
       {/* تأكيد الاعتماد */}
       <ConfirmDialog
         open={approveConfirmOpen}
-        onOpenChange={setApproveConfirmOpen}
+        onOpenChange={closeApproveDialog}
         title="اعتماد المنجز النوعي"
         description="هل أنت متأكد من اعتماد هذا المنجز النوعي؟"
         confirmLabel="اعتماد"
@@ -210,7 +253,7 @@ export default function QualitativeApprovalsPage() {
       />
 
       {/* مربع حوار الرفض */}
-      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+      <Dialog open={rejectDialogOpen} onOpenChange={closeRejectDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>رفض المنجز النوعي</DialogTitle>
@@ -220,6 +263,12 @@ export default function QualitativeApprovalsPage() {
           </DialogHeader>
 
           <div className="space-y-4 py-4">
+            {rejectError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700 break-words flex-1">{rejectError}</p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="qual-reject-reason">سبب الرفض</Label>
               <textarea
@@ -243,7 +292,7 @@ export default function QualitativeApprovalsPage() {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setRejectDialogOpen(false)}
+              onClick={() => closeRejectDialog(false)}
             >
               إلغاء
             </Button>
