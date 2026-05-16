@@ -55,6 +55,15 @@ class OrganizationUnit(MPTTModel):
         null=True, blank=True,
         verbose_name='آخر مزامنة مع النظام الخارجي',
     )
+    # عدد الموظفين الفعلي في الوحدة (يُحدَّث من النظام الخارجي عند كل مزامنة).
+    # ضروري للمقارنة العادلة بين الأقسام: قسم بـ 20 موظّفاً يُنجز مهمّتَين
+    # ليس مكافئاً لقسم بـ 35 موظّفاً يُنجز نفس المهمّتَين. القيمة الافتراضيّة 0
+    # حتى تتم أوّل مزامنة ناجحة.
+    employees_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name='عدد الموظّفين',
+        help_text='يأتي من النظام الخارجي ويُحدَّث مع كل مزامنة.',
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name='تاريخ الإنشاء',

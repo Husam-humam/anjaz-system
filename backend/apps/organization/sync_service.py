@@ -263,6 +263,7 @@ class OrganizationSyncService:
                     'unit_type_name': flat_data.get('unit_type_name', ''),
                     'parent_external_id': parent_id,
                     'is_active': flat_data.get('is_active', True),
+                    'employees_count': flat_data.get('employees_count', 0) or 0,
                 }
                 children = node.get('children') or []
                 if children:
@@ -414,6 +415,7 @@ class OrganizationSyncService:
             unit_type=mapped_type,
             parent=None,
             is_active=ext_data.get('is_active', True),
+            employees_count=ext_data.get('employees_count', 0) or 0,
             external_synced_at=now,
             # placeholders لحقول MPTT — يُعاد حسابها في rebuild()
             lft=0, rght=0, tree_id=0, level=0,
@@ -449,17 +451,20 @@ class OrganizationSyncService:
         لا يلمس أي حقل محلي خاص (التخصيصات تبقى كما هي).
         """
         new_code = self._safe_code(ext_data['code'], local.external_id)
+        new_employees_count = ext_data.get('employees_count', 0) or 0
         changed = (
             local.name != ext_data['name']
             or local.code != new_code
             or local.unit_type != mapped_type
             or local.is_active != ext_data.get('is_active', True)
+            or local.employees_count != new_employees_count
         )
 
         local.name = ext_data['name']
         local.code = new_code
         local.unit_type = mapped_type
         local.is_active = ext_data.get('is_active', True)
+        local.employees_count = new_employees_count
         local.external_synced_at = now
 
         OrganizationUnit.objects.filter(pk=local.pk).update(
@@ -467,6 +472,7 @@ class OrganizationSyncService:
             code=local.code,
             unit_type=local.unit_type,
             is_active=local.is_active,
+            employees_count=local.employees_count,
             external_synced_at=local.external_synced_at,
         )
         return changed

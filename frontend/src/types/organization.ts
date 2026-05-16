@@ -12,6 +12,8 @@ export interface OrganizationUnit {
   is_supervised?: boolean;
   /** المعرّف في النظام الخارجي (إن وُجد) */
   external_id?: number | null;
+  /** عدد الموظّفين الفعليّ في الوحدة (من النظام الخارجي) */
+  employees_count?: number;
   children?: OrganizationUnit[];
   created_at: string;
   updated_at: string;
@@ -36,6 +38,7 @@ export interface SupervisedUnitNested {
   unit: number;
   unit_name: string;
   unit_code: string;
+  unit_employees_count?: number;
   created_at: string;
 }
 

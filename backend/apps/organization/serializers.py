@@ -21,11 +21,13 @@ class OrganizationUnitSerializer(serializers.ModelSerializer):
             'id', 'name', 'code', 'unit_type',
             'parent', 'parent_name', 'is_active',
             'is_planning', 'is_supervised', 'external_id',
+            'employees_count',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'created_at', 'updated_at',
             'is_planning', 'is_supervised', 'external_id',
+            'employees_count',
         ]
 
     def get_is_planning(self, obj):
@@ -54,7 +56,8 @@ class OrganizationTreeSerializer(serializers.ModelSerializer):
         model = OrganizationUnit
         fields = [
             'id', 'name', 'code', 'unit_type',
-            'is_active', 'is_planning', 'is_supervised', 'children'
+            'is_active', 'is_planning', 'is_supervised',
+            'employees_count', 'children'
         ]
 
     def get_children(self, obj):
@@ -76,10 +79,16 @@ class SupervisedUnitNestedSerializer(serializers.ModelSerializer):
     """قسم مُشرَف عليه — تمثيل مُبسَّط داخل PlanningAssignment."""
     unit_name = serializers.CharField(source='unit.name', read_only=True)
     unit_code = serializers.CharField(source='unit.code', read_only=True)
+    unit_employees_count = serializers.IntegerField(
+        source='unit.employees_count', read_only=True,
+    )
 
     class Meta:
         model = SupervisedUnit
-        fields = ['id', 'unit', 'unit_name', 'unit_code', 'created_at']
+        fields = [
+            'id', 'unit', 'unit_name', 'unit_code',
+            'unit_employees_count', 'created_at',
+        ]
         read_only_fields = ['id', 'created_at']
 
 

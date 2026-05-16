@@ -46,6 +46,7 @@ import {
   Search,
   Settings,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 
@@ -256,6 +257,17 @@ export default function OrganizationPage() {
             <span className="font-medium text-gray-900">{node.name}</span>
             <span className="text-xs text-gray-400 mr-2">({node.code})</span>
           </div>
+
+          {/* عدد الموظّفين — يُعرض فقط لو > 0 لتجنّب الازدحام البصري */}
+          {(node.employees_count ?? 0) > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
+              title={`${node.employees_count} موظّفاً في هذه الوحدة (من النظام الخارجي)`}
+            >
+              <Users className="w-3 h-3" />
+              {node.employees_count}
+            </span>
+          )}
 
           <span
             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
@@ -488,6 +500,11 @@ function QismAssignmentDialog({
             <span>
               رمز: <span className="font-mono text-gray-700">{qism.code}</span>
             </span>
+            <span className="text-gray-400">•</span>
+            <span className="inline-flex items-center gap-1 text-gray-700">
+              <Users className="w-3.5 h-3.5" />
+              {qism.employees_count ?? 0} موظّفاً
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -615,6 +632,13 @@ function QismAssignmentDialog({
                                 {u.parent_path ?? "—"}
                                 <span className="mx-1.5">•</span>
                                 <span className="font-mono">{u.code}</span>
+                                {(u.employees_count ?? 0) > 0 && (
+                                  <>
+                                    <span className="mx-1.5">•</span>
+                                    <Users className="inline w-3 h-3 ml-0.5" />{" "}
+                                    {u.employees_count}
+                                  </>
+                                )}
                               </p>
                             </div>
                             <Plus className="w-4 h-4 text-blue-600 flex-shrink-0" />
@@ -652,8 +676,17 @@ function QismAssignmentDialog({
                         className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm text-gray-900 truncate">
-                            {s.unit_name}
+                          <p className="font-medium text-sm text-gray-900 truncate flex items-center gap-2">
+                            <span className="truncate">{s.unit_name}</span>
+                            {(s.unit_employees_count ?? 0) > 0 && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 flex-shrink-0"
+                                title={`${s.unit_employees_count} موظّفاً`}
+                              >
+                                <Users className="w-3 h-3" />
+                                {s.unit_employees_count}
+                              </span>
+                            )}
                           </p>
                           <p className="text-xs text-gray-400 font-mono truncate">
                             {s.unit_code}
