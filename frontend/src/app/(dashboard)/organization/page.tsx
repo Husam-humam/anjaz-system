@@ -321,20 +321,6 @@ function QismAssignmentDialog({
     setActionError(null);
   }, [qism?.id]);
 
-  if (!qism) return null;
-
-  // تحديد الحالة من البيانات المُحمَّلة
-  const planningAssignment = assignments.find((a) => a.planning_unit === qism.id);
-  const supervisor = assignments.find((a) =>
-    a.supervised_units.some((s) => s.unit === qism.id),
-  );
-
-  const role: "planning" | "supervised" | "unassigned" = planningAssignment
-    ? "planning"
-    : supervisor
-    ? "supervised"
-    : "unassigned";
-
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["planning-assignments"] });
     queryClient.invalidateQueries({ queryKey: ["organization-tree"] });
@@ -342,12 +328,16 @@ function QismAssignmentDialog({
 
   const handleError = (err: unknown) => setActionError(getErrorMessage(err));
 
+  // الـ mutations يجب أن تُعرَّف قبل أي return مبكر لتثبيت ترتيب الـ hooks.
+  // نستخدم `qism?.id` ونحرس داخل mutationFn بأن `qism` موجود وقت الاستدعاء.
   const createAssignmentMutation = useMutation({
-    mutationFn: () =>
-      createPlanningAssignment({
+    mutationFn: () => {
+      if (!qism) throw new Error("لا يوجد قسم محدّد");
+      return createPlanningAssignment({
         planning_unit: qism.id,
         context_parent: qism.parent,
-      }),
+      });
+    },
     onSuccess: () => {
       invalidateAll();
       setActionError(null);
@@ -381,6 +371,20 @@ function QismAssignmentDialog({
     onSuccess: () => invalidateAll(),
     onError: handleError,
   });
+
+  if (!qism) return null;
+
+  // تحديد الحالة من البيانات المُحمَّلة
+  const planningAssignment = assignments.find((a) => a.planning_unit === qism.id);
+  const supervisor = assignments.find((a) =>
+    a.supervised_units.some((s) => s.unit === qism.id),
+  );
+
+  const role: "planning" | "supervised" | "unassigned" = planningAssignment
+    ? "planning"
+    : supervisor
+    ? "supervised"
+    : "unassigned";
 
   // الأقسام المتاحة للإشراف عليها (غير مُسنَدة كتخطيط ولا مُشرَف عليها بالفعل)
   const planningUnitIds = new Set(assignments.map((a) => a.planning_unit));
