@@ -12,7 +12,13 @@ from .services import ReportService
 
 
 def _validate_unit_scope(request, unit_id):
-    """التحقق من نطاق صلاحية المستخدم على الوحدة المحددة"""
+    """
+    التحقق من نطاق صلاحية المستخدم على الوحدة المحدّدة.
+
+    يعتمد بالكامل على التخصيصات الصريحة (PlanningAssignment + SupervisedUnit
+    + ViewScope) عبر `_user_view_scope_qism_ids` — لا fallback من MPTT
+    (أُلغي في Phase F).
+    """
     if unit_id is None:
         return None
     if request.user.role == 'statistics_admin':
@@ -23,17 +29,26 @@ def _validate_unit_scope(request, unit_id):
                 {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-    elif request.user.role == 'planning_section' and request.user.unit:
-        parent = request.user.unit.parent
-        if parent:
-            allowed_ids = list(parent.get_descendants().values_list('id', flat=True))
-            allowed_ids.append(parent.id)
-            if unit_id not in allowed_ids:
-                return Response(
-                    {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-    return None
+        return None
+
+    # planning_section و viewer كلاهما يخضع لـ ViewScope + التخصيصات الصريحة.
+    if request.user.role in ('planning_section', 'viewer'):
+        from apps.submissions.services import _user_view_scope_qism_ids
+        scope_ids = _user_view_scope_qism_ids(request.user)
+        if scope_ids is None:
+            return None  # نطاق كامل (يُحدث للأدمن فقط نظرياً)
+        if unit_id not in scope_ids:
+            return Response(
+                {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    # دور غير معروف — رفض احترازي
+    return Response(
+        {'detail': 'لا تملك صلاحية الوصول لهذه الوحدة'},
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 
 class ReportSummaryView(APIView):

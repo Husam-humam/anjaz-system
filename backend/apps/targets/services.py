@@ -213,13 +213,11 @@ class TargetService:
         if not qism_ids:
             return 0
 
+        # تقدّم نحو المستهدف يحتسب المنجزات المُعتمَدة فقط (قاعدة عمل #5).
         answers = SubmissionAnswer.objects.filter(
             submission__qism_id__in=qism_ids,
             submission__weekly_period__year=year,
-            submission__status__in=[
-                WeeklySubmission.Status.SUBMITTED,
-                WeeklySubmission.Status.APPROVED,
-            ],
+            submission__status=WeeklySubmission.Status.APPROVED,
             form_item__indicator=indicator,
             numeric_value__isnull=False,
         )
@@ -407,13 +405,11 @@ class TargetService:
         if not qism_ids:
             return {}
 
+        # تقدّم نحو المستهدف يحتسب المنجزات المُعتمَدة فقط (قاعدة عمل #5).
         answers = SubmissionAnswer.objects.filter(
             submission__qism_id__in=qism_ids,
             submission__weekly_period__year=year,
-            submission__status__in=[
-                WeeklySubmission.Status.SUBMITTED,
-                WeeklySubmission.Status.APPROVED,
-            ],
+            submission__status=WeeklySubmission.Status.APPROVED,
             form_item__indicator=indicator,
             numeric_value__isnull=False,
         ).values('submission__qism_id', 'numeric_value')

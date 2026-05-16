@@ -136,9 +136,10 @@ class ReportService:
             }
 
         week_ids = list(weeks.values_list('id', flat=True))
+        # الإحصاء يحتسب المنجزات المُعتمَدة فقط (قاعدة عمل #5 في CLAUDE.md).
         submissions = WeeklySubmission.objects.filter(
             weekly_period_id__in=week_ids,
-            status__in=['submitted', 'approved'],
+            status='approved',
         ).select_related('qism', 'form_template')
 
         # تصفية حسب الوحدة (تُشمل أقسام الأحفاد)

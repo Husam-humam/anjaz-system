@@ -49,11 +49,12 @@ export default function SubmissionPage() {
     }
   }, [currentPeriod]);
 
-  // حفظ الإجابات
+  // حفظ الإجابات + الملاحظات
   const saveMutation = useMutation({
-    mutationFn: (data: { id: number; answers: AnswerInput[] }) =>
+    mutationFn: (data: { id: number; answers: AnswerInput[]; notes: string }) =>
       updateSubmission(data.id, {
         answers: data.answers,
+        notes: data.notes,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["submissions"] });
@@ -83,8 +84,12 @@ export default function SubmissionPage() {
         is_qualitative: a.is_qualitative || false,
         qualitative_details: a.qualitative_details || "",
       }));
-    saveMutation.mutate({ id: submission.id, answers: answersArray });
-  }, [submission?.id, submission?.is_editable, answers]);
+    saveMutation.mutate({
+      id: submission.id,
+      answers: answersArray,
+      notes: submission.notes ?? "",
+    });
+  }, [submission?.id, submission?.is_editable, submission?.notes, answers]);
 
   // الحفظ التلقائي كل دقيقتين
   useEffect(() => {

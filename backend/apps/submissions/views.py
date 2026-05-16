@@ -15,6 +15,7 @@ from apps.organization.permissions import (
     IsStatisticsAdminOrReadOnly,
 )
 
+from .permissions import IsNotViewer
 from .models import (
     SubmissionAnswer,
     WeeklyPeriod,
@@ -32,6 +33,7 @@ from .serializers import (
     WeeklySubmissionUpdateSerializer,
 )
 from .services import (
+    QismExtensionService,
     QualitativeService,
     SubmissionAdminService,
     SubmissionService,
@@ -525,6 +527,8 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
+        # نتحقّق فقط من الحقول المدخلة، ثم نمرّر لـ QismExtensionService الذي
+        # يتولّى الفحوصات الكاملة + AuditLog + تحديث حالة المنجز + الإشعار.
         data = request.data.copy()
         data['weekly_period'] = period.id
 
@@ -532,7 +536,15 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         try:
-            serializer.save(granted_by=request.user)
+            extension = QismExtensionService.grant_extension(
+                data={
+                    'qism': serializer.validated_data['qism'],
+                    'weekly_period': period,
+                    'new_deadline': serializer.validated_data['new_deadline'],
+                    'reason': serializer.validated_data.get('reason', ''),
+                },
+                granted_by=request.user,
+            )
         except IntegrityError:
             return Response(
                 {
@@ -544,17 +556,10 @@ class WeeklyPeriodViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # تحديث حالة المنجز إلى "ممدد" إن وُجد
-        WeeklySubmission.objects.filter(
-            qism_id=serializer.validated_data['qism'].id,
-            weekly_period=period,
-            status__in=[
-                WeeklySubmission.Status.DRAFT,
-                WeeklySubmission.Status.LATE,
-            ],
-        ).update(status=WeeklySubmission.Status.EXTENDED)
-
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(
+            QismExtensionSerializer(extension).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # ══════════════════════════════════════════════
@@ -574,7 +579,9 @@ class WeeklySubmissionViewSet(viewsets.ModelViewSet):
     GET    /api/submissions/{id}/history/ — سجل المنجزات
     """
     serializer_class = WeeklySubmissionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    # IsNotViewer يمنع viewer من أي POST/PATCH/PUT/DELETE — يبقى GET مسموحاً
+    # محصور بنطاق ViewScope عبر get_queryset.
+    permission_classes = [permissions.IsAuthenticated, IsNotViewer]
     filterset_fields = ['weekly_period', 'status']
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
@@ -1052,7 +1059,7 @@ class QualitativeViewSet(viewsets.GenericViewSet):
     POST   /api/qualitative/{answer_id}/reject/  — رفض [statistics_admin]
     """
     serializer_class = QualitativeAnswerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsNotViewer]
     lookup_field = 'pk'
 
     def get_permissions(self):

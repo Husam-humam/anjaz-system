@@ -187,13 +187,30 @@ class OrganizationSyncService:
 
         # 2) دمج البيانات: external_id → {name, code, unit_type_name, parent_id, is_active}
         external_units = self._merge_tree_and_flat(tree, flat_units)
-        if not external_units:
-            # استجابة فارغة — نُسجّل تحذيراً ونمضي. منطق الـ deactivate سيُعطّل
-            # الوحدات المحلية ذات external_id (مما يعني أن المؤسّسة الخارجيّة
-            # عمليّاً فارغة). الوحدات اليدويّة (external_id IS NULL) لن تتأثّر.
+
+        # حماية: استجابة فارغة بشكل غير متوقّع تُسبّب تعطيل كل الوحدات
+        # المُزامَنة سابقاً (خسارة الهيكل بأكمله). هذا قد يحدث بسبب خطأ مؤقّت
+        # في النظام الخارجي (مثلاً مفتاح API انتهت صلاحيته فأرجع 200 بـ
+        # results=[]). لو كان لدينا وحدات مزامَنة سابقاً وفجأة الاستجابة
+        # فارغة، نرفض المزامنة بدلاً من تعطيل كل شيء.
+        local_external_count = OrganizationUnit.objects.filter(
+            external_id__isnull=False,
+            is_active=True,
+        ).count()
+        if not external_units and local_external_count > 0:
+            report.errors.append(
+                f'النظام الخارجي أعاد استجابة فارغة بينما يوجد '
+                f'{local_external_count} وحدة مُزامَنة محلياً. '
+                f'تم رفض المزامنة لمنع تعطيل الهيكل بأكمله. '
+                f'يُرجى التحقّق من حالة النظام الخارجي قبل إعادة المحاولة.'
+            )
+            report.finished_at = timezone.now()
+            return report
+        elif not external_units:
+            # حالة بدء جديد — لا وحدات محليّة سابقة وأيضاً الاستجابة فارغة.
             logger.warning(
                 'النظام الخارجي أعاد استجابة فارغة — '
-                'سيتم تعطيل أي وحدات محلية مرتبطة سابقاً.'
+                'لا توجد وحدات سابقة، نُمضي بدون تغيير.'
             )
 
         # 3) تنفيذ المزامنة داخل transaction

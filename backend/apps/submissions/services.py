@@ -431,7 +431,7 @@ class SubmissionService:
             form_item_id = answer_data.get('form_item_id')
 
             # تحديد حالة المنجز النوعي:
-            # - غير نوعي → NONE
+            # - غير نوعي → NONE (مرفوض لو كان معتمداً مسبقاً — قاعدة حماية)
             # - نوعي وكان معتمداً سابقاً → نُبقيه معتمداً
             # - نوعي ولم يُعتمد → PENDING_PLANNING (يُحدّث عند submit أيضاً)
             is_qualitative = answer_data.get('is_qualitative', False)
@@ -439,9 +439,22 @@ class SubmissionService:
                 submission=submission, form_item_id=form_item_id,
             ).first()
 
+            already_approved = (
+                existing is not None
+                and existing.qualitative_status == SubmissionAnswer.QualitativeStatus.APPROVED
+            )
+
+            # حماية: لا يمكن إلغاء العَلَم النوعي عن إجابة سبق اعتمادها — وإلا
+            # يستطيع مدير القسم شطب اعتماد سابق صامتاً بتعديل بسيط.
+            if already_approved and not is_qualitative:
+                raise ValidationError(
+                    'لا يمكن إزالة الصفة النوعيّة عن إجابة سبق اعتمادها. '
+                    'اطلب من قسم التخطيط/الإحصاء إرجاع المنجز أوّلاً.'
+                )
+
             if not is_qualitative:
                 qualitative_status = SubmissionAnswer.QualitativeStatus.NONE
-            elif existing and existing.qualitative_status == SubmissionAnswer.QualitativeStatus.APPROVED:
+            elif already_approved:
                 qualitative_status = SubmissionAnswer.QualitativeStatus.APPROVED
             else:
                 qualitative_status = SubmissionAnswer.QualitativeStatus.PENDING_PLANNING
@@ -1120,16 +1133,15 @@ class AggregationService:
 
         start_week, end_week = week_ranges
 
-        # الحصول على الإجابات ضمن النطاق
+        # الحصول على الإجابات ضمن النطاق.
+        # الإحصاء يحتسب المنجزات المُعتمَدة فقط (قاعدة عمل #5 في CLAUDE.md):
+        # SUBMITTED = أُرسل لكن لم يُعتمَد بعد من التخطيط، فلا يدخل الإحصاء.
         answers = SubmissionAnswer.objects.filter(
             submission__qism_id=qism_id,
             submission__weekly_period__year=year,
             submission__weekly_period__week_number__gte=start_week,
             submission__weekly_period__week_number__lte=end_week,
-            submission__status__in=[
-                WeeklySubmission.Status.SUBMITTED,
-                WeeklySubmission.Status.APPROVED,
-            ],
+            submission__status=WeeklySubmission.Status.APPROVED,
             form_item__indicator_id=indicator_id,
             numeric_value__isnull=False,
         ).order_by('submission__weekly_period__week_number')
@@ -1164,14 +1176,11 @@ class AggregationService:
 
         # إذا كان القسم نفسه (مستوى القسم)
         if unit.unit_type == UnitType.QISM:
-            # إرجاع مجموع القيم الأسبوعية للسنة
+            # المنجزات المُعتمَدة فقط (قاعدة عمل #5).
             answers = SubmissionAnswer.objects.filter(
                 submission__qism=unit,
                 submission__weekly_period__year=year,
-                submission__status__in=[
-                    WeeklySubmission.Status.SUBMITTED,
-                    WeeklySubmission.Status.APPROVED,
-                ],
+                submission__status=WeeklySubmission.Status.APPROVED,
                 form_item__indicator=indicator,
                 numeric_value__isnull=False,
             ).order_by('submission__weekly_period__week_number')

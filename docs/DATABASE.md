@@ -15,8 +15,15 @@
 ```
 OrganizationUnit (MPTT Tree)
 │   unit_type: daira | mudiriya | qism
-│   qism_role: regular | planning | statistics
 │   parent → self (nullable)
+│   external_id, external_synced_at, employees_count  (sourced from external system)
+│
+├── PlanningAssignment (planning_unit OneToOne → OrganizationUnit)
+│       └── SupervisedUnit (assignment FK, unit OneToOne → OrganizationUnit)
+│
+├── ViewScope (user OneToOne → User, viewable_units M2M → OrganizationUnit)
+│
+├── ExternalUnitTypeMapping (external_type_name → treat_as)
 │
 ├── User (unit_id FK)
 │
@@ -25,7 +32,7 @@ OrganizationUnit (MPTT Tree)
 │               └── Indicator (indicator_id FK)
 │                       └── IndicatorCategory
 │
-├── Target (qism_id + indicator_id + year)
+├── Target (scope_unit_id + indicator_id + year)
 │
 └── WeeklySubmission (qism_id + weekly_period_id)
         └── SubmissionAnswer (submission_id + form_item_id)
@@ -49,9 +56,11 @@ Notification (recipient_id → User)
 | name | VARCHAR(200) | NOT NULL | Unit name |
 | code | VARCHAR(20) | UNIQUE, NOT NULL | Short identifier |
 | unit_type | VARCHAR(20) | NOT NULL | `daira` / `mudiriya` / `qism` |
-| qism_role | VARCHAR(20) | NOT NULL, DEFAULT `regular` | `regular` / `planning` / `statistics` |
 | parent_id | INT | FK → self, NULL | Parent unit (NULL = root) |
 | is_active | BOOLEAN | DEFAULT TRUE | Soft delete |
+| external_id | INT | UNIQUE, NULL | ID of this unit in the external org system (NULL for manually-created units) |
+| external_synced_at | TIMESTAMPTZ | NULL | Last successful sync with the external system |
+| employees_count | INT | NOT NULL, DEFAULT 0 | Headcount, refreshed from the external system on every sync |
 | created_at | TIMESTAMPTZ | auto | |
 | updated_at | TIMESTAMPTZ | auto | |
 | lft | INT | MPTT auto | |
@@ -64,7 +73,85 @@ Notification (recipient_id → User)
 - `mudiriya` → parent must be `daira` or NULL (independent)
 - `qism` → parent must be `mudiriya` or `daira`
 - `qism` cannot be a parent of any other unit
-- `qism_role` is meaningful only when `unit_type = 'qism'`
+- The role of a qism (planning vs. regular) is **not** stored on this table — see `planning_assignments` / `supervised_units` below.
+
+---
+
+### 3.1a `planning_assignments`
+
+Declares which organization unit acts as a planning section. A unit becomes a "planning qism" by virtue of having a row here — there is no `qism_role` flag on `organization_units`.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| id | SERIAL | PK | |
+| planning_unit_id | INT | FK → organization_units, **UNIQUE** (OneToOne), ON DELETE PROTECT | The unit acting as planning section |
+| context_parent_id | INT | FK → organization_units, NULL, ON DELETE SET NULL | Mudiriya / Daira shown in reports as the planner's organizational context — does **not** constrain supervised scope |
+| notes | TEXT | | |
+| created_by_id | INT | FK → users, NULL | Statistics admin who created the assignment |
+| created_at | TIMESTAMPTZ | auto | |
+| updated_at | TIMESTAMPTZ | auto | |
+
+**Rules:**
+- A unit can have at most one `PlanningAssignment` (OneToOne on `planning_unit`).
+- The set of supervised qisms is given by `supervised_units` rows, not by MPTT descendants.
+
+---
+
+### 3.1b `supervised_units`
+
+Maps an "ordinary" qism to the planning assignment that supervises it. Every qism that can submit a `WeeklySubmission` must have a row here — there is no implicit MPTT fallback.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| id | SERIAL | PK | |
+| assignment_id | INT | FK → planning_assignments, ON DELETE CASCADE | The supervising planning assignment |
+| unit_id | INT | FK → organization_units, **UNIQUE** (OneToOne), ON DELETE PROTECT | The supervised qism |
+| created_at | TIMESTAMPTZ | auto | |
+
+**Rules:**
+- `unit` is OneToOne — each qism is supervised by exactly one planning assignment.
+- `unit` cannot equal `assignment.planning_unit` (a planning qism cannot supervise itself; enforced in `clean()`).
+
+---
+
+### 3.1c `view_scopes`
+
+Read-only scope for a user. Used by the `viewer` role to express "this user can see exactly these units" without granting any management rights. May also extend the visibility of a `planning_section` user beyond their managed scope.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| id | SERIAL | PK | |
+| user_id | INT | FK → users, **UNIQUE** (OneToOne), ON DELETE CASCADE | |
+| notes | TEXT | | |
+| created_by_id | INT | FK → users, NULL | Statistics admin who created the scope |
+| created_at | TIMESTAMPTZ | auto | |
+| updated_at | TIMESTAMPTZ | auto | |
+
+Plus the M2M table `view_scopes_viewable_units` (`view_scope_id`, `organizationunit_id`) linking to `organization_units`.
+
+**Rules:**
+- Resolution of "which qism ids this user may see" happens in `_user_view_scope_qism_ids(user)` — it merges `SupervisedUnit` + `ViewScope` + own-unit, depending on role.
+
+---
+
+### 3.1d `external_unit_type_mappings`
+
+Admin-configurable mapping from the external system's unit type names to one of Anjaz's three types (or `ignore`). Read by the org-sync service to decide how to import each external unit.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| id | SERIAL | PK | |
+| external_type_name | VARCHAR(100) | UNIQUE, NOT NULL | e.g. value returned by `unit_type_name` from `/reference/unit-types/` |
+| external_type_id | INT | NULL | Optional external ID — informational, not used for matching |
+| treat_as | VARCHAR(20) | NULL | `daira` / `mudiriya` / `qism` / `ignore` (NULL = "undecided", treated as skip) |
+| notes | TEXT | | |
+| created_at | TIMESTAMPTZ | auto | |
+| updated_at | TIMESTAMPTZ | auto | |
+
+**Sync semantics:**
+- `treat_as` set to one of the three Anjaz types → unit is imported with that type.
+- `treat_as = 'ignore'` → unit is skipped deliberately.
+- `treat_as = NULL` → unit is skipped and counted under `skipped_unknown_type` for admin review.
 
 ---
 
@@ -76,17 +163,18 @@ Notification (recipient_id → User)
 | username | VARCHAR(150) | UNIQUE, NOT NULL | Login username |
 | password | VARCHAR(255) | NOT NULL | Hashed |
 | full_name | VARCHAR(200) | NOT NULL | |
-| role | VARCHAR(30) | NOT NULL | `statistics_admin` / `planning_section` / `section_manager` |
+| role | VARCHAR(30) | NOT NULL | `statistics_admin` / `planning_section` / `section_manager` / `viewer` |
 | unit_id | INT | FK → organization_units, NULL | Linked organizational unit |
 | is_active | BOOLEAN | DEFAULT TRUE | |
 | created_by_id | INT | FK → users, NULL | Who created this user |
 | created_at | TIMESTAMPTZ | auto | |
 | updated_at | TIMESTAMPTZ | auto | |
 
-**Role ↔ Unit Type Mapping:**
-- `statistics_admin` → must link to a qism with `qism_role = statistics`
-- `planning_section` → must link to a qism with `qism_role = planning`
-- `section_manager` → must link to a qism with `qism_role = regular`
+**Role ↔ Unit Mapping:** (enforced in `User.clean()`; the "kind" of a qism is derived from the assignment tables, not a column)
+- `statistics_admin` → `unit` is **optional**; scope is implicit (full system).
+- `planning_section` → `unit` is **required** and must be a qism that has a row in `planning_assignments`. Managed scope = supervised units of that assignment.
+- `section_manager` → `unit` is **required** and must be a qism that has a row in `supervised_units` (i.e. is supervised by some planning assignment).
+- `viewer` → `unit` is **optional**; read-only scope is given by `view_scopes.viewable_units`.
 
 ---
 
@@ -127,7 +215,7 @@ Notification (recipient_id → User)
 | Column | Type | Description |
 |---|---|---|
 | id | SERIAL PK | |
-| qism_id | FK → organization_units | Must be `unit_type = qism, qism_role = regular` |
+| qism_id | FK → organization_units | Must be a qism with a `SupervisedUnit` row (i.e. an ordinary, supervised qism — not a planning qism) |
 | version | INT NOT NULL | Auto-incremented per qism |
 | status | VARCHAR(20) | `draft` / `pending_approval` / `approved` / `superseded` / `rejected` |
 | effective_from_week | INT NULL | Week number this version takes effect |
@@ -178,7 +266,7 @@ approved → superseded
 | Column | Type | Description |
 |---|---|---|
 | id | SERIAL PK | |
-| qism_id | FK → organization_units | |
+| scope_unit_id | FK → organization_units, **NULL** | Daira / mudiriya / qism. NULL = institution-wide target |
 | indicator_id | FK → indicators | |
 | year | INT | |
 | target_value | FLOAT | Must be > 0 |
@@ -187,7 +275,13 @@ approved → superseded
 | created_at | TIMESTAMPTZ | |
 | updated_at | TIMESTAMPTZ | |
 
-**UNIQUE:** `(qism_id, indicator_id, year)`
+**UNIQUE:** `(scope_unit_id, indicator_id, year)` — note that PostgreSQL treats NULLs as distinct, so the model's `clean()` enforces uniqueness manually for institution-wide rows (`scope_unit IS NULL`).
+
+**Validation Rules:**
+- `scope_unit` may be a daira, mudiriya, or qism (or NULL for institution-wide).
+- If `scope_unit` is a qism, it must be a supervised qism (has a `SupervisedUnit` row) — planning qisms cannot have targets.
+- Text indicators cannot have a target.
+- `last_value` indicators may only have qism-level targets (no hierarchical aggregation defined for `last_value`).
 
 **Note:** Targets are optional. If no target exists for an indicator, the system displays the raw value only (no progress bar).
 
@@ -216,7 +310,7 @@ approved → superseded
 | Column | Type | Description |
 |---|---|---|
 | id | SERIAL PK | |
-| qism_id | FK | Must be `qism_role = regular` |
+| qism_id | FK | Must be a qism with a `SupervisedUnit` row (an ordinary, supervised qism) |
 | weekly_period_id | FK | |
 | form_template_id | FK | Snapshot of template version used |
 | status | VARCHAR(20) | `draft` / `submitted` / `approved` / `returned` / `late` / `extended` / `returned_by_admin` |
@@ -383,7 +477,8 @@ System-wide **append-only** audit trail. Every business action writes one row vi
 
 **Visibility (`GET /api/submissions/{id}/audit-log/`):**
 - `section_manager`: their own qism's submissions only
-- `planning_section`: submissions within their scope (`_planning_section_scope_qism_ids`)
+- `planning_section`: submissions within their scope (resolved by `_user_view_scope_qism_ids` — union of `SupervisedUnit` rows attached to the planner's `PlanningAssignment` plus any extra units from their `ViewScope`)
+- `viewer`: read-only — submissions whose qism is in their `ViewScope.viewable_units` (also resolved via `_user_view_scope_qism_ids`)
 - `statistics_admin`: full scope
 
 ---
@@ -415,7 +510,7 @@ For the same indicator at higher levels:
 ```python
 # For a given section and indicator:
 cumulative_value = aggregate(weekly_submissions, start_of_year, today)
-target_value = Target.objects.get(qism=qism, indicator=indicator, year=year).target_value
+target_value = Target.objects.get(scope_unit=qism, indicator=indicator, year=year).target_value
 progress_percentage = (cumulative_value / target_value) * 100
 ```
 
@@ -432,7 +527,7 @@ CREATE INDEX idx_submissions_qism ON weekly_submissions(qism_id);
 CREATE INDEX idx_submissions_status ON weekly_submissions(status);
 CREATE INDEX idx_answers_submission ON submission_answers(submission_id);
 CREATE INDEX idx_notifications_recipient ON notifications(recipient_id, is_read);
-CREATE INDEX idx_targets_lookup ON targets(qism_id, indicator_id, year);
+CREATE INDEX idx_targets_lookup ON targets(scope_unit_id, indicator_id, year);
 ```
 
 ---

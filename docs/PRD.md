@@ -20,11 +20,12 @@ A government institution's planning and follow-up directorate manually collects 
 
 ## 2. Solution
 
-A web-based system with three user tiers that digitizes the entire weekly reporting cycle:
+A web-based system with four user tiers that digitizes the entire weekly reporting cycle:
 
 1. **Statistics Admin (Central Statistics Dept, ~5–6 employees)** — Builds the indicators bank, manages users, controls the weekly cycle, sets targets, **reviews every approved submission** (approve / edit values / return to planning), maintains audit log.
-2. **Planning Sections** — Build section-specific forms from the indicators bank, approve weekly submissions from their directorate's sections.
+2. **Planning Sections** — Build section-specific forms from the indicators bank, approve weekly submissions from the qisms they supervise (membership defined explicitly via `PlanningAssignment` / `SupervisedUnit`, not by tree position).
 3. **Section Managers** — Fill their weekly achievement form; optionally flag notable achievements as "qualitative."
+4. **Viewers (مُطّلِع)** — Read-only access to a configurable set of units (defined via `ViewScope`); cannot submit, approve, edit, or return anything.
 
 The system auto-aggregates weekly data into all periodic reports, eliminating redundant data entry entirely.
 
@@ -56,7 +57,7 @@ Once any admin acts on a submission, **no other admin can act on the same submis
 | SA-09 | As a statistics admin, I can approve or reject qualitative achievements (second and final approval step) |
 | SA-10 | As a statistics admin, I can view a full institutional dashboard showing all sections' compliance and progress |
 | SA-11 | As a statistics admin, I can export any report as PDF or Excel (with generation timestamp on every export) |
-| SA-12 | As a statistics admin, I can build and manage the organizational hierarchy (dairas, mudiriyas, qisms) |
+| SA-12 | As a statistics admin, I can sync the organizational hierarchy from the external org system, configure the mapping of external unit types to Anjaz types, and create units manually only for exceptions |
 | SA-13 | As a statistics admin, I can view all submissions awaiting my review on the "المنجزات" page, filtered by week / daira / mudiriya / qism |
 | SA-14 | As a statistics admin, I can review a submission once — approve (no reason), edit values (mandatory reason, full audit trail), or return to planning (mandatory reason). After my action, no other admin can re-review the same submission |
 | SA-15 | As a statistics admin, I can view the full audit log timeline for any submission — who did what, when, with what reason, and the exact field-by-field diffs for any edits |
@@ -87,6 +88,14 @@ Once any admin acts on a submission, **no other admin can act on the same submis
 | SM-06 | As a section manager, I can track my section's progress toward annual targets |
 | SM-07 | As a section manager, I receive in-app notifications for deadlines and approvals |
 
+### Viewer (مُطّلِع)
+
+| ID | Story |
+|---|---|
+| VW-01 | As a viewer, I can read submissions, reports, and analytics restricted to the units in my `ViewScope` |
+| VW-02 | As a viewer, I cannot create, edit, submit, approve, return, or otherwise change any data — the UI hides all action controls and the API returns 403 if attempted |
+| VW-03 | As a viewer, the units I can see are configured by the statistics admin (added/removed at any time) without changing my role |
+
 ---
 
 ## 4. Functional Requirements
@@ -95,7 +104,9 @@ Once any admin acts on a submission, **no other admin can act on the same submis
 - Support a variable-depth hierarchy: Daira → Mudiriya → Qism, Daira → Qism, or Mudiriya → Qism (independent).
 - Each unit has a unique code and name.
 - Units can be deactivated (soft delete).
-- Three special qism roles: `regular` (submits data), `planning` (reviews), `statistics` (admin).
+- The org tree is **sourced from the external organizational system via sync** (each unit keeps an `external_id` and `external_synced_at`, and `employees_count` is refreshed from there on every sync). Manual creation of units is reserved for exceptions.
+- A qism's role (planning section vs. ordinary supervised section) is **not** a column on the unit. It is set by explicit assignment: `PlanningAssignment` declares a qism as a planning section, and `SupervisedUnit` links each ordinary qism to the planning section that supervises it. The statistics admin role needs no special unit kind.
+- An admin-managed mapping table (`ExternalUnitTypeMapping`) translates the external system's unit-type names to Anjaz's three types (or `ignore`) before import.
 
 ### 4.2 Indicators Bank
 - Indicators have: name, description, unit type (number/percentage/text/hours/days), unit label, accumulation type (sum/average/last_value), and category.
@@ -187,5 +198,4 @@ Once any admin acts on a submission, **no other admin can act on the same submis
 - Email notifications
 - Mobile native application
 - Multi-language support beyond Arabic
-- Integration with external HR or ERP systems
 - Automated week creation (manual only in v1.0)

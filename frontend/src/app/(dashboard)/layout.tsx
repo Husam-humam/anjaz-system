@@ -22,6 +22,13 @@ const ADMIN_PLANNING_ROUTES = [
   "/reports",
   "/forms",
 ];
+// المسارات الوحيدة المسموحة لدور المُطّلِع (قراءة فقط — لا إجراءات).
+const VIEWER_ALLOWED_ROUTES = [
+  "/dashboard",
+  "/reports",
+  "/notifications",
+  "/profile",
+];
 
 export default function DashboardLayout({
   children,
@@ -61,6 +68,17 @@ export default function DashboardLayout({
       // قسم التخطيط: لا يمكنه الوصول إلى صفحات الإدارة فقط
       if (role === "planning_section") {
         if (ADMIN_ONLY_ROUTES.some((r) => pathname.startsWith(r))) {
+          router.replace("/dashboard");
+          return;
+        }
+      }
+
+      // المُطّلِع: قراءة فقط — يُسمح بقائمة صريحة، أي شيء آخر يُعاد توجيهه.
+      if (role === "viewer") {
+        const allowed = VIEWER_ALLOWED_ROUTES.some((r) =>
+          pathname.startsWith(r),
+        );
+        if (!allowed) {
           router.replace("/dashboard");
           return;
         }

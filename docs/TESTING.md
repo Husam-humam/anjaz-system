@@ -33,10 +33,14 @@ pytest --cov=apps --cov-report=html
 
 ```
 apps/organization/tests/
-├── factories.py          # OrganizationUnitFactory, etc.
-├── test_models.py        # Model validation tests
-├── test_services.py      # Business logic tests
-└── test_api.py           # API endpoint tests
+├── factories.py                    # OrganizationUnitFactory, etc.
+├── test_models.py                  # Model validation tests
+├── test_services.py                # Business logic tests
+├── test_api.py                     # API endpoint tests
+├── test_assignment_models.py       # PlanningAssignment / SupervisedUnit / ViewScope models
+├── test_assignment_permissions.py  # Scope resolution via assignments + ViewScope
+├── test_external_client.py        # External org-system HTTP client
+└── test_sync_service.py            # Sync service (mapping + import)
 
 apps/submissions/tests/
 ├── factories.py
@@ -45,6 +49,8 @@ apps/submissions/tests/
 ├── test_aggregation.py   # Accumulation logic tests
 └── test_api.py
 ```
+
+The new assignment / external-sync test files live alongside the existing organization tests and cover the post-`qism_role` world: the explicit `PlanningAssignment` + `SupervisedUnit` + `ViewScope` models, the external API client, and the org-sync service that consumes `ExternalUnitTypeMapping`.
 
 ---
 
@@ -62,7 +68,6 @@ class DairaFactory(factory.django.DjangoModelFactory):
     name = factory.Sequence(lambda n: f"دائرة {n}")
     code = factory.Sequence(lambda n: f"D{n:03d}")
     unit_type = "daira"
-    qism_role = "regular"
     parent = None
 
 class MudiriyaFactory(factory.django.DjangoModelFactory):
@@ -72,7 +77,6 @@ class MudiriyaFactory(factory.django.DjangoModelFactory):
     name = factory.Sequence(lambda n: f"مديرية {n}")
     code = factory.Sequence(lambda n: f"M{n:03d}")
     unit_type = "mudiriya"
-    qism_role = "regular"
     parent = factory.SubFactory(DairaFactory)
 
 class QismFactory(factory.django.DjangoModelFactory):
@@ -82,14 +86,26 @@ class QismFactory(factory.django.DjangoModelFactory):
     name = factory.Sequence(lambda n: f"قسم {n}")
     code = factory.Sequence(lambda n: f"Q{n:03d}")
     unit_type = "qism"
-    qism_role = "regular"
     parent = factory.SubFactory(MudiriyaFactory)
 
+# Same model — just different naming defaults. PlanningQismFactory does NOT
+# auto-create a PlanningAssignment; tests that need a planning section create
+# the assignment explicitly (see the pattern in apps/submissions/tests/test_api.py):
+#
+#     from apps.organization.models import PlanningAssignment, SupervisedUnit
+#     planning_qism = PlanningQismFactory(parent=mudiriya)
+#     regular_qism = QismFactory(parent=mudiriya)
+#     assignment = PlanningAssignment.objects.create(planning_unit=planning_qism)
+#     SupervisedUnit.objects.create(assignment=assignment, unit=regular_qism)
 class PlanningQismFactory(QismFactory):
-    qism_role = "planning"
+    name = factory.Sequence(lambda n: f"قسم تخطيط {n}")
+    code = factory.Sequence(lambda n: f"P{n:03d}")
 
+# Retained for backwards compatibility — `statistics_admin` no longer needs any
+# special qism kind, so this factory just creates a plain qism with a label.
 class StatisticsQismFactory(QismFactory):
-    qism_role = "statistics"
+    name = factory.Sequence(lambda n: f"قسم إحصاء {n}")
+    code = factory.Sequence(lambda n: f"S{n:03d}")
 ```
 
 ---
