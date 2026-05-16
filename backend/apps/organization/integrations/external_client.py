@@ -163,6 +163,11 @@ class ExternalOrgClient:
             'Authorization': f'ApiKey {self.api_key}',
             'Accept': 'application/json',
         }
+        # دعم Host header مخصّص عند الحاجة (مثلاً النظام الخارجي يقيد ALLOWED_HOSTS
+        # على localhost لكنّ docker يصل عبر host.docker.internal).
+        host_override = getattr(settings, 'EXTERNAL_ORG_HOST_HEADER', '') or ''
+        if host_override:
+            headers['Host'] = host_override
         try:
             response = requests.get(
                 url, headers=headers, params=params, timeout=self.timeout

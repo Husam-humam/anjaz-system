@@ -17,8 +17,10 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # ملاحظة: لا نُعرّض المنفذ إلى الـ host لتجنّب التعارض مع أي Redis محلي.
+    # الـ backend يصل عبر docker network (hostname: redis).
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -41,6 +43,16 @@ services:
       redis:
         condition: service_healthy
     env_file: .env
+    # داخل docker، يجب أن يشير الـ backend إلى docker service "db" / "redis"،
+    # وليس إلى localhost الذي يعني الـ backend container نفسه. والـ API الخارجي
+    # موجود على الـ host (Windows)، نصل إليه عبر host.docker.internal.
+    environment:
+      DB_HOST: db
+      REDIS_URL: redis://redis:6379/0
+      EXTERNAL_ORG_API_URL: http://host.docker.internal:8001/api/external/
+      EXTERNAL_ORG_HOST_HEADER: localhost:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:

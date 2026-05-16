@@ -32,19 +32,9 @@ class Command(BaseCommand):
             if created:
                 self.stdout.write(f'  ✓ تم إنشاء تصنيف: {cat_name}')
 
-        # 2. إنشاء الهيكل التنظيمي الأساسي (قسم الإحصاء)
-        stat_qism, created = OrganizationUnit.objects.get_or_create(
-            code='STAT',
-            defaults={
-                'name': 'قسم الإحصاء',
-                'unit_type': 'qism',
-
-            }
-        )
-        if created:
-            self.stdout.write('  ✓ تم إنشاء قسم الإحصاء')
-
-        # 3. إنشاء مستخدم مدير الإحصاء
+        # 2. إنشاء مستخدم مدير الإحصاء
+        # بعد إلغاء qism_role، مدير الإحصاء لا يحتاج قسم مخصّص — يبقى unit=None
+        # (الهيكل التنظيمي يأتي من النظام الخارجي عبر المزامنة).
         admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
         admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123456')
         admin_full_name = os.environ.get('ADMIN_FULL_NAME', 'مدير النظام')
@@ -54,7 +44,7 @@ class Command(BaseCommand):
                 username=admin_username,
                 full_name=admin_full_name,
                 role='statistics_admin',
-                unit=stat_qism,
+                unit=None,
                 is_staff=True,
                 is_superuser=True,
             )

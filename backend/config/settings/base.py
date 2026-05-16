@@ -190,6 +190,10 @@ CHANNEL_LAYERS = {
 EXTERNAL_ORG_API_URL = env('EXTERNAL_ORG_API_URL', default='')
 EXTERNAL_ORG_API_KEY = env('EXTERNAL_ORG_API_KEY', default='')
 EXTERNAL_ORG_API_TIMEOUT = env.int('EXTERNAL_ORG_API_TIMEOUT', default=15)
+# Host header override: للحالات التي يصل فيها الـ backend إلى النظام الخارجي
+# عبر hostname لا يقبله النظام الخارجي في ALLOWED_HOSTS (مثلاً
+# host.docker.internal من داخل docker بينما النظام الخارجي يسمح فقط بـ localhost).
+EXTERNAL_ORG_HOST_HEADER = env('EXTERNAL_ORG_HOST_HEADER', default='')
 
 # Logging
 LOGGING = {
