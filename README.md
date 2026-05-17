@@ -30,7 +30,7 @@
 
 ### الخلفية (Backend)
 - **Python 3.12+** / **Django 5.x** / **Django REST Framework**
-- **PostgreSQL 16** — قاعدة البيانات
+- **PostgreSQL 18** — قاعدة البيانات
 - **Redis** — قنوات WebSocket
 - **django-mptt** — الشجرة التنظيمية الهرمية
 - **Simple JWT** — المصادقة

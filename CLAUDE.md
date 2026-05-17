@@ -32,7 +32,7 @@
 - **Python 3.12+** with **Django 5.x**
 - **Django REST Framework (DRF)** for APIs
 - **django-mptt** for hierarchical organization tree
-- **PostgreSQL 16** as the database
+- **PostgreSQL 18** as the database
 - **Redis** for WebSocket channels
 - **Django Channels** for real-time notifications
 - **ReportLab** for PDF export

@@ -4,7 +4,7 @@
 
 ## 1. Technology
 
-- **PostgreSQL 16**
+- **PostgreSQL 18**
 - **django-mptt** for the organizational hierarchy (Modified Preorder Tree Traversal)
 - All tables prefixed by app name (configured via `Meta.db_table`)
 

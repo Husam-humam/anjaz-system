@@ -296,7 +296,7 @@ FileResponse (download)
 ```yaml
 services:
   db:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_DB: anjaz_db
       POSTGRES_USER: anjaz_user
