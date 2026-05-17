@@ -17,10 +17,14 @@ class IndicatorCategoryViewSet(viewsets.ModelViewSet):
         return IndicatorCategory.objects.all().order_by('name')
 
     def perform_create(self, serializer):
-        IndicatorCategoryService.create_category(serializer.validated_data)
+        # نُعيد ربط الـ instance المُنشأ بالـ serializer ليُعاد في الرد
+        # (وإلّا DRF يرسل request data فقط بدون الـ id).
+        serializer.instance = IndicatorCategoryService.create_category(
+            serializer.validated_data
+        )
 
     def perform_update(self, serializer):
-        IndicatorCategoryService.update_category(
+        serializer.instance = IndicatorCategoryService.update_category(
             self.get_object(), serializer.validated_data
         )
 
@@ -41,12 +45,12 @@ class IndicatorViewSet(viewsets.ModelViewSet):
         ).order_by('-created_at')
 
     def perform_create(self, serializer):
-        IndicatorService.create_indicator(
-            serializer.validated_data, created_by=self.request.user
+        serializer.instance = IndicatorService.create_indicator(
+            serializer.validated_data, created_by=self.request.user,
         )
 
     def perform_update(self, serializer):
-        IndicatorService.update_indicator(
+        serializer.instance = IndicatorService.update_indicator(
             self.get_object(), serializer.validated_data, actor=self.request.user,
         )
 

@@ -37,7 +37,9 @@ class OrganizationUnitViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        OrganizationService.create_unit(serializer.validated_data)
+        serializer.instance = OrganizationService.create_unit(
+            serializer.validated_data
+        )
 
     def perform_destroy(self, instance):
         OrganizationService.deactivate_unit(instance)
@@ -97,6 +99,31 @@ class PlanningAssignmentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        """نُرجع البيانات الكاملة (Read serializer) بعد الإنشاء — وليس فقط حقول
+        الكتابة (وإلّا الفرونت لن يحصل على id ولا اسم الوحدة، إلخ)."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        read_serializer = PlanningAssignmentSerializer(serializer.instance)
+        headers = self.get_success_headers(read_serializer.data)
+        return Response(
+            read_serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        read_serializer = PlanningAssignmentSerializer(serializer.instance)
+        return Response(read_serializer.data)
 
     @action(detail=True, methods=['post'], url_path='supervised-units')
     def add_supervised_unit(self, request, pk=None):
@@ -166,6 +193,30 @@ class ViewScopeViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        """نُرجع Read serializer بعد الإنشاء (يتضمّن id + viewable_units_detail)."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        read_serializer = ViewScopeSerializer(serializer.instance)
+        headers = self.get_success_headers(read_serializer.data)
+        return Response(
+            read_serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        read_serializer = ViewScopeSerializer(serializer.instance)
+        return Response(read_serializer.data)
 
 
 class ExternalUnitTypeMappingViewSet(viewsets.ModelViewSet):
