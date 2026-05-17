@@ -56,3 +56,12 @@ coverage/
 *.tmp
 *.bak
 *.orig
+
+# SSL certificates and private keys — NEVER commit
+ssl/
+*.key
+*.pem
+*.crt
+*.cer
+*.pfx
+*.p12

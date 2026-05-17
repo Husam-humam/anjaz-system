@@ -17,3 +17,5 @@ gunicorn>=21.2,<23.0
 whitenoise>=6.6,<7.0
 # مكتبة HTTP — للتواصل مع نظام الهيكل التنظيمي الخارجي
 requests>=2.31,<3.0
+# Redis cache backend — لـ DRF throttling (يحفظ العدّاد بين workers)
+django-redis>=5.4,<6.0

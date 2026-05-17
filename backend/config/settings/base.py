@@ -194,6 +194,14 @@ CORS_ALLOW_CREDENTIALS = True
 # CSRF
 CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['http://localhost:3000'])
 
+# خلف nginx الذي ينهي TLS — نُعلِم Django أن الطلب الأصلي كان HTTPS عبر
+# الـ header X-Forwarded-Proto. هذا ضروري لـ:
+#   - request.is_secure() يُرجع True
+#   - secure cookies تُرسَل عبر HTTPS بشكل صحيح
+#   - SimpleJWT لا يرفض الـ refresh tokens
+USE_X_FORWARDED_HOST = env.bool('USE_X_FORWARDED_HOST', default=True)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Channels
 CHANNEL_LAYERS = {
     'default': {
