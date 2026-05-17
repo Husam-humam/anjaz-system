@@ -10,8 +10,9 @@ from apps.forms.tests.factories import (
     FormTemplateFactory, FormTemplateItemFactory,
 )
 from apps.indicators.tests.factories import IndicatorFactory
+from apps.organization.models import PlanningAssignment, SupervisedUnit
 from apps.organization.tests.factories import (
-    DairaFactory, MudiriyaFactory, QismFactory,
+    DairaFactory, MudiriyaFactory, PlanningQismFactory, QismFactory,
 )
 from apps.submissions.tests.factories import (
     SubmissionAnswerFactory, WeeklyPeriodFactory, WeeklySubmissionFactory,
@@ -21,6 +22,18 @@ from apps.targets.services import TargetService
 from apps.targets.tests.factories import TargetFactory
 
 
+def _make_supervised_qism(**kwargs):
+    """ينشئ قسماً عاديّاً مرتبطاً بـ PlanningAssignment + SupervisedUnit.
+
+    يقبل نفس kwargs الخاصة بـ QismFactory (parent, is_active, ...).
+    """
+    qism = QismFactory(**kwargs)
+    planning = PlanningQismFactory(parent=qism.parent)
+    assignment, _ = PlanningAssignment.objects.get_or_create(planning_unit=planning)
+    SupervisedUnit.objects.get_or_create(assignment=assignment, unit=qism)
+    return qism
+
+
 @pytest.mark.django_db
 class TestTargetServiceCRUD:
     """اختبارات العمليات الأساسية (إنشاء/تحديث/حذف)"""
@@ -28,7 +41,7 @@ class TestTargetServiceCRUD:
     def test_create_qism_target(self):
         """إنشاء مستهدف على مستوى قسم"""
         admin = StatisticsAdminFactory()
-        qism = QismFactory()
+        qism = _make_supervised_qism()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -94,13 +107,13 @@ class TestTargetServiceCRUD:
 
     def test_update_target(self):
         """تحديث مستهدف"""
-        target = TargetFactory(target_value=100.0)
+        target = TargetFactory(scope_unit=_make_supervised_qism(), target_value=100.0)
         updated = TargetService.update_target(target, {'target_value': 200.0})
         assert updated.target_value == 200.0
 
     def test_delete_target(self):
         """حذف مستهدف"""
-        target = TargetFactory()
+        target = TargetFactory(scope_unit=_make_supervised_qism())
         pk = target.pk
         TargetService.delete_target(target)
         assert not Target.objects.filter(pk=pk).exists()
@@ -112,9 +125,9 @@ class TestScopeQismIds:
 
     def test_institution_scope_returns_all_regular_qisms(self):
         """نطاق المؤسسة يُرجع كل الأقسام العادية النشطة"""
-        q1 = QismFactory(is_active=True)
-        q2 = QismFactory(is_active=True)
-        QismFactory(is_active=False)  # غير نشط — يجب أن يُستبعد
+        q1 = _make_supervised_qism(is_active=True)
+        q2 = _make_supervised_qism(is_active=True)
+        _make_supervised_qism(is_active=False)  # غير نشط — يجب أن يُستبعد
 
         result = TargetService.get_scope_qism_ids(None)
         assert q1.id in result
@@ -130,10 +143,10 @@ class TestScopeQismIds:
     def test_mudiriya_scope_returns_child_qisms(self):
         """نطاق مديرية يُرجع أقسامها التابعة"""
         mudiriya = MudiriyaFactory()
-        q1 = QismFactory(parent=mudiriya)
-        q2 = QismFactory(parent=mudiriya)
+        q1 = _make_supervised_qism(parent=mudiriya)
+        q2 = _make_supervised_qism(parent=mudiriya)
         # قسم في مديرية أخرى — لا يجب أن يظهر
-        QismFactory()
+        _make_supervised_qism()
 
         result = TargetService.get_scope_qism_ids(mudiriya)
         assert q1.id in result
@@ -144,8 +157,8 @@ class TestScopeQismIds:
         """نطاق دائرة يُرجع الأقسام المتداخلة عبر المديريات"""
         daira = DairaFactory()
         mudiriya = MudiriyaFactory(parent=daira)
-        q1 = QismFactory(parent=mudiriya)
-        q2 = QismFactory(parent=mudiriya)
+        q1 = _make_supervised_qism(parent=mudiriya)
+        q2 = _make_supervised_qism(parent=mudiriya)
 
         result = TargetService.get_scope_qism_ids(daira)
         assert q1.id in result
@@ -315,9 +328,9 @@ class TestScopeBreakdown:
     def test_breakdown_shows_all_qisms(self):
         """التفصيل يُظهر كل الأقسام حتى غير المساهمة"""
         mudiriya = MudiriyaFactory()
-        q1 = QismFactory(parent=mudiriya)
-        q2 = QismFactory(parent=mudiriya)
-        q3 = QismFactory(parent=mudiriya)  # لن يساهم
+        q1 = _make_supervised_qism(parent=mudiriya)
+        q2 = _make_supervised_qism(parent=mudiriya)
+        q3 = _make_supervised_qism(parent=mudiriya)  # لن يساهم
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -520,7 +533,7 @@ class TestBreakdownTree:
 
     def test_qism_target_returns_empty_tree(self):
         """مستهدف قسم يُرجع شجرة فارغة (لا تفصيل)"""
-        qism = QismFactory()
+        qism = _make_supervised_qism()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )

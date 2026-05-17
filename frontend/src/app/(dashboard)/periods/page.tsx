@@ -10,7 +10,6 @@ import {
 } from "@/lib/api/submissions";
 import type { WeeklyPeriod } from "@/types/submissions";
 import type { ComplianceData } from "@/lib/api/submissions";
-import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";

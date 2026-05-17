@@ -11,8 +11,8 @@ interface AuthState {
   refreshToken: string | null;
   setAuth: (user: User, token: string, refreshToken: string) => void;
   setToken: (token: string) => void;
+  /** يمسح كل بيانات الـ auth محلياً (لا يستدعي API). */
   clearAuth: () => void;
-  logout: () => void;
   isAuthenticated: () => boolean;
 }
 
@@ -26,7 +26,6 @@ export const useAuthStore = create<AuthState>()(
         set({ user, token, refreshToken }),
       setToken: (token) => set({ token }),
       clearAuth: () => set({ user: null, token: null, refreshToken: null }),
-      logout: () => set({ user: null, token: null, refreshToken: null }),
       isAuthenticated: () => !!get().token,
     }),
     {

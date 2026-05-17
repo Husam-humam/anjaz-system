@@ -6,8 +6,7 @@ import { useCallback } from "react";
 import { login as loginApi, logout as logoutApi } from "@/lib/api/auth";
 
 export function useAuth() {
-  const { user, token, refreshToken, setAuth, logout: clearAuth } =
-    useAuthStore();
+  const { user, token, refreshToken, setAuth, clearAuth } = useAuthStore();
   const router = useRouter();
 
   const login = useCallback(

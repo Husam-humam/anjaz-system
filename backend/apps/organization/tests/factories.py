@@ -78,19 +78,24 @@ class StatisticsQismFactory(QismFactory):
 
 
 class SupervisedQismFactory(QismFactory):
-    """قسم مُسنَد للتقديم — يُنشأ مع SupervisedUnit إلى planner مُحدَّد."""
+    """قسم مُسنَد للتقديم — يُنشأ مع SupervisedUnit إلى planner مُحدَّد.
+
+    تمرير `_supervise_under=<PlanningAssignment instance>` لربط القسم بتخصيص
+    موجود. إن لم يُمرَّر شيء، يُنشأ planning_unit + PlanningAssignment تلقائياً
+    تحت نفس الأب.
+    """
 
     @factory.post_generation
     def _supervise_under(obj, create, extracted, **kwargs):
-        """
-        Pass `_supervise_under=<PlanningAssignment instance>` لربط القسم.
-        إن لم يُمرَّر شيء، يُنشأ planning_unit + assignment تلقائياً.
-        """
         if not create:
             return
         if isinstance(extracted, PlanningAssignment):
             assignment = extracted
         else:
             planning_unit = PlanningQismFactory(parent=obj.parent)
-            assignment = PlanningAssignment.objects.get(planning_unit=planning_unit)
+            # بعد Phase F: PlanningQismFactory لم يَعُد يُنشئ PlanningAssignment
+            # تلقائياً — ننشئها بأنفسنا.
+            assignment, _ = PlanningAssignment.objects.get_or_create(
+                planning_unit=planning_unit,
+            )
         SupervisedUnit.objects.create(assignment=assignment, unit=obj)

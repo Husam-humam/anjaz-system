@@ -29,8 +29,10 @@ class UserService:
             raise ValidationError({'password': e.messages})
         user = User(**data)
         user.created_by = created_by
-        user.full_clean()
+        # set_password قبل full_clean — حقل password مطلوب فلا يجوز أن يبقى
+        # فارغاً وقت التحقق. نُعطي اللائحة قيمة hash قبل clean ثم save.
         user.set_password(password)
+        user.full_clean()
         user.save()
 
         # سجل التدقيق — قاعدة عمل #14

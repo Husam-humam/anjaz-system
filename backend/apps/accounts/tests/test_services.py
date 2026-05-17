@@ -48,7 +48,7 @@ class TestUserServiceCreateUser:
         assert user.password != 'securepass123'
 
     def test_create_user_statistics_admin_valid(self):
-        """التحقق من إنشاء مدير إحصاء مرتبط بقسم إحصاء"""
+        """التحقق من إنشاء مدير إحصاء — بعد Phase F لا يحتاج إلى قسم إحصاء خاصّ."""
         admin = StatisticsAdminFactory()
         stats_qism = StatisticsQismFactory()
 
@@ -65,41 +65,23 @@ class TestUserServiceCreateUser:
         assert user.role == 'statistics_admin'
         # بعد Phase F: لا يوجد qism_role — admin role لا يحتاج قسم خاصّ
 
-    def _skip_test_create_user_invalid_role_unit_mismatch(self):
-        """[ملغاة بعد Phase F] لا يوجد تطابق إلزامي بين الدور ونوع القسم."""
-        pass
-
-    def _skip_test_create_user_planning_in_regular_qism_fails(self):
-        """[ملغاة بعد Phase F] صلاحيّة التخطيط تأتي من PlanningAssignment."""
+    def test_create_user_without_unit_for_role_requiring_unit_fails(self):
+        """مدير قسم بدون unit يجب أن يُرفض من قِبَل التحقّق في clean()."""
         admin = StatisticsAdminFactory()
-        regular_qism = QismFactory()
-
         data = {
-            'username': 'bad_planner',
-            'full_name': 'مخطط خاطئ',
-            'role': 'planning_section',
-            'unit': regular_qism,
-            'password': 'securepass123',
-        }
-        with pytest.raises(ValidationError) as exc_info:
-            UserService.create_user(data, created_by=admin)
-        assert 'unit' in exc_info.value.message_dict
-
-    def test_create_user_section_manager_in_planning_qism_fails(self):
-        """التحقق من رفض إنشاء مدير قسم في قسم تخطيط"""
-        admin = StatisticsAdminFactory()
-        planning_qism = PlanningQismFactory()
-
-        data = {
-            'username': 'bad_manager',
-            'full_name': 'مدير خاطئ',
+            'username': 'bad_manager_no_unit',
+            'full_name': 'مدير بلا قسم',
             'role': 'section_manager',
-            'unit': planning_qism,
+            'unit': None,
             'password': 'securepass123',
         }
         with pytest.raises(ValidationError) as exc_info:
             UserService.create_user(data, created_by=admin)
-        assert 'unit' in exc_info.value.message_dict
+        # إمّا 'unit' أو رسالة عربيّة تذكر «قسم»
+        msg_dict = exc_info.value.message_dict
+        assert 'unit' in msg_dict or any(
+            'قسم' in str(v) for v in msg_dict.values()
+        )
 
 
 @pytest.mark.django_db

@@ -14,6 +14,7 @@ from apps.organization.tests.factories import (
     DairaFactory,
     MudiriyaFactory,
     QismFactory,
+    SupervisedQismFactory,
 )
 from apps.targets.tests.factories import TargetFactory
 
@@ -24,7 +25,8 @@ class TestTargetAPI:
 
     def test_list_targets(self, api_client):
         admin = StatisticsAdminFactory()
-        TargetFactory.create_batch(3)
+        for _ in range(3):
+            TargetFactory(scope_unit=SupervisedQismFactory())
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
@@ -36,7 +38,7 @@ class TestTargetAPI:
     def test_create_qism_target_admin(self, api_client):
         """إنشاء مستهدف على مستوى قسم"""
         admin = StatisticsAdminFactory()
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -148,7 +150,7 @@ class TestTargetAPI:
         TargetFactory(scope_unit=None, indicator=indicator, year=2026)
         TargetFactory(scope_unit=daira, indicator=indicator, year=2026)
         TargetFactory(scope_unit=mudiriya, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=QismFactory(), indicator=indicator, year=2026)
+        TargetFactory(scope_unit=SupervisedQismFactory(), indicator=indicator, year=2026)
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
@@ -165,7 +167,7 @@ class TestTargetAPI:
     def test_progress_action(self, api_client):
         """نقطة /targets/{id}/progress/ تُرجع حساب التقدم"""
         admin = StatisticsAdminFactory()
-        target = TargetFactory(target_value=200)
+        target = TargetFactory(scope_unit=SupervisedQismFactory(), target_value=200)
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-progress', kwargs={'pk': target.pk})
@@ -183,8 +185,8 @@ class TestTargetAPI:
         """
         admin = StatisticsAdminFactory()
         mudiriya = MudiriyaFactory()
-        q1 = QismFactory(parent=mudiriya)
-        q2 = QismFactory(parent=mudiriya)
+        q1 = SupervisedQismFactory(parent=mudiriya)
+        q2 = SupervisedQismFactory(parent=mudiriya)
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -208,7 +210,7 @@ class TestTargetAPI:
     def test_breakdown_for_qism_target_is_empty(self, api_client):
         """مستهدف قسم يُرجع تفصيلاً فارغاً"""
         admin = StatisticsAdminFactory()
-        target = TargetFactory()  # الافتراضي قسم
+        target = TargetFactory(scope_unit=SupervisedQismFactory())  # الافتراضي قسم
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-breakdown', kwargs={'pk': target.pk})

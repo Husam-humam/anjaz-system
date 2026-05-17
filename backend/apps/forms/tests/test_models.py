@@ -1,7 +1,12 @@
 import pytest
 from django.core.exceptions import ValidationError
 
-from apps.organization.tests.factories import QismFactory, PlanningQismFactory
+from apps.organization.tests.factories import (
+    QismFactory,
+    PlanningQismFactory,
+    SupervisedQismFactory,
+)
+from apps.accounts.tests.factories import PlanningSectionUserFactory
 from .factories import FormTemplateFactory, FormTemplateItemFactory
 
 
@@ -18,9 +23,15 @@ class TestFormTemplateValidation:
         assert "يجب أن تكون الاستمارة مرتبطة بقسم عادي فقط" in str(exc.value)
 
     def test_form_template_valid_for_regular_qism(self):
-        """قالب الاستمارة صالح لقسم عادي"""
-        regular_qism = QismFactory()
-        template = FormTemplateFactory.build(qism=regular_qism, version=1)
+        """قالب الاستمارة صالح لقسم عادي (مُسنَد للتقديم عبر SupervisedUnit)"""
+        # بعد Phase F: «قسم عادي» = قسم له supervisor_link (SupervisedUnit)
+        supervised_qism = SupervisedQismFactory(_supervise_under=True)
+        creator = PlanningSectionUserFactory()
+        template = FormTemplateFactory.build(
+            qism=supervised_qism,
+            version=1,
+            created_by=creator,
+        )
         template.full_clean()  # يجب ألا يرفع استثناء
 
     def test_form_template_str(self):

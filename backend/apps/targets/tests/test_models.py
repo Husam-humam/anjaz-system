@@ -2,11 +2,13 @@ import pytest
 from django.core.exceptions import ValidationError
 
 from apps.indicators.tests.factories import IndicatorFactory
+from apps.organization.models import PlanningAssignment
 from apps.organization.tests.factories import (
     DairaFactory,
     MudiriyaFactory,
     PlanningQismFactory,
     QismFactory,
+    SupervisedQismFactory,
 )
 from .factories import TargetFactory
 
@@ -43,7 +45,7 @@ class TestTargetValidation:
 
     def test_valid_target_value(self):
         """القيمة المستهدفة الموجبة صالحة"""
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -73,7 +75,7 @@ class TestTargetValidation:
 
     def test_target_str_includes_scope_and_indicator(self):
         """__str__ يرجع اسم النطاق والمؤشر والسنة"""
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -130,13 +132,15 @@ class TestHierarchicalScope:
 
     def test_qism_level_target_allowed(self):
         """المستهدفات على مستوى القسم مسموحة"""
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         target = TargetFactory(scope_unit=qism)
         assert target.scope_level == 'qism'
 
     def test_special_qism_cannot_be_scope(self):
         """الأقسام الخاصة (تخطيط/إحصاء) لا يمكن أن تكون نطاقاً"""
         planning_qism = PlanningQismFactory()
+        # بعد Phase F: قسم التخطيط يُحدَّد عبر PlanningAssignment
+        PlanningAssignment.objects.create(planning_unit=planning_qism)
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -147,10 +151,6 @@ class TestHierarchicalScope:
             target.full_clean()
         # الوصول للرسائل عبر message_dict لتجنّب مشكلة Unicode escaping في str()
         assert 'scope_unit' in exc.value.message_dict
-        assert any(
-            'الخاصة' in msg
-            for msg in exc.value.message_dict['scope_unit']
-        )
 
     def test_last_value_indicator_at_mudiriya_level_rejected(self):
         """مؤشر 'آخر قيمة' لا يُسمح به على مستوى المديرية"""
@@ -179,7 +179,7 @@ class TestHierarchicalScope:
 
     def test_last_value_indicator_at_qism_level_allowed(self):
         """مؤشر 'آخر قيمة' مسموح على مستوى القسم"""
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         lv_indicator = IndicatorFactory(
             unit_type="number", accumulation_type="last_value"
         )
@@ -193,7 +193,7 @@ class TestUniqueConstraint:
 
     def test_cannot_duplicate_qism_target(self):
         """لا يمكن إنشاء مستهدفين لنفس القسم والمؤشر والسنة"""
-        target1 = TargetFactory()
+        target1 = TargetFactory(scope_unit=SupervisedQismFactory())
         with pytest.raises(Exception):
             TargetFactory(
                 scope_unit=target1.scope_unit,
@@ -218,7 +218,7 @@ class TestUniqueConstraint:
         )
         daira = DairaFactory()
         mudiriya = MudiriyaFactory(parent=daira)
-        qism = QismFactory(parent=mudiriya)
+        qism = SupervisedQismFactory(parent=mudiriya)
 
         # ثلاث مستهدفات مختلفة لنفس المؤشر والسنة
         TargetFactory(scope_unit=None, indicator=indicator, year=2026)

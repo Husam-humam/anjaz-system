@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getSubmissions, approveSubmission } from "@/lib/api/submissions";
 import type { WeeklySubmission, SubmissionAnswer } from "@/types/submissions";
-import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";

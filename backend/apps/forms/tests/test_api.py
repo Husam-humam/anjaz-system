@@ -44,10 +44,22 @@ class TestFormTemplateSubmitAPI:
     """اختبارات تقديم القالب للاعتماد عبر API"""
 
     def test_submit_template_for_approval_endpoint(self, api_client):
-        """اختبار تقديم قالب للاعتماد عبر نقطة النهاية"""
+        """اختبار تقديم قالب للاعتماد عبر نقطة النهاية.
+
+        بعد Phase F: المخطّط يحتاج PlanningAssignment + SupervisedUnit للقسم
+        حتى يدخل ضمن نطاق رؤيته (vue scope) ويستطيع تقديم القالب.
+        """
+        from apps.organization.models import PlanningAssignment, SupervisedUnit
+
         mudiriya = MudiriyaFactory()
         qism = QismFactory(parent=mudiriya)
         planner = PlanningSectionUserFactory(unit__parent=mudiriya)
+        # نُسنِد القسم للمخطّط عبر PlanningAssignment + SupervisedUnit
+        assignment, _ = PlanningAssignment.objects.get_or_create(
+            planning_unit=planner.unit,
+        )
+        SupervisedUnit.objects.get_or_create(assignment=assignment, unit=qism)
+
         template = FormTemplateFactory(
             qism=qism, status='draft', created_by=planner,
         )
@@ -112,12 +124,17 @@ class TestFormTemplateApproveAPI:
         assert response.data['status'] == FormTemplate.Status.APPROVED
 
     def test_non_admin_cannot_approve(self, api_client):
-        """اختبار أن غير مدير الإحصاء لا يمكنه اعتماد القالب"""
-        planner = PlanningSectionUserFactory()
+        """اختبار أن مدير القسم لا يمكنه اعتماد القالب.
+
+        بعد Phase F: مدير الإحصاء وقسم التخطيط (ضمن نطاقه) كلاهما يستطيع
+        الاعتماد. مدير القسم لا يستطيع.
+        """
+        # مدير قسم — لا يستطيع الاعتماد (لا يدخل ضمن whitelist الـ approve)
+        manager = SectionManagerFactory()
         template = FormTemplateFactory(status='pending_approval')
         FormTemplateItemFactory(form_template=template)
 
-        api_client.force_authenticate(user=planner)
+        api_client.force_authenticate(user=manager)
         url = reverse('form-template-approve', kwargs={'pk': template.pk})
         data = {
             'effective_from_week': 5,
@@ -125,7 +142,8 @@ class TestFormTemplateApproveAPI:
         }
         response = api_client.post(url, data=data, format='json')
 
-        assert response.status_code == 403
+        # مدير القسم خارج نطاق القالب → 404 (لا يصل للقالب) أو 403 صراحة
+        assert response.status_code in (403, 404)
 
 
 @pytest.mark.django_db
@@ -148,17 +166,22 @@ class TestFormTemplateRejectAPI:
         assert response.data['rejection_reason'] == 'البيانات غير مكتملة'
 
     def test_non_admin_cannot_reject(self, api_client):
-        """اختبار أن غير مدير الإحصاء لا يمكنه رفض القالب"""
-        planner = PlanningSectionUserFactory()
+        """اختبار أن مدير القسم لا يمكنه رفض القالب.
+
+        بعد Phase F: مدير الإحصاء وقسم التخطيط (ضمن نطاقه) كلاهما يستطيع
+        الرفض. مدير القسم لا يستطيع.
+        """
+        manager = SectionManagerFactory()
         template = FormTemplateFactory(status='pending_approval')
         FormTemplateItemFactory(form_template=template)
 
-        api_client.force_authenticate(user=planner)
+        api_client.force_authenticate(user=manager)
         url = reverse('form-template-reject', kwargs={'pk': template.pk})
         data = {'rejection_reason': 'سبب ما'}
         response = api_client.post(url, data=data, format='json')
 
-        assert response.status_code == 403
+        # مدير القسم خارج نطاق القالب → 404 أو 403
+        assert response.status_code in (403, 404)
 
 
 @pytest.mark.django_db

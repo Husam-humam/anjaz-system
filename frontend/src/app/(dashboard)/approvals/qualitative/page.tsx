@@ -8,7 +8,6 @@ import {
   rejectQualitative,
 } from "@/lib/api/submissions";
 import type { SubmissionAnswer } from "@/types/submissions";
-import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";

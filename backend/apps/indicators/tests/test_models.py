@@ -20,7 +20,8 @@ class TestIndicatorValidation:
 
     def test_text_indicator_valid_with_last_value(self):
         """المؤشر النصي صالح مع طريقة تجميع 'آخر قيمة'"""
-        indicator = IndicatorFactory.build(
+        # استخدام .create() لأن المؤشر الآن يستلزم created_by (FK لمستخدم)
+        indicator = IndicatorFactory(
             unit_type="text",
             accumulation_type="last_value",
         )
@@ -28,7 +29,7 @@ class TestIndicatorValidation:
 
     def test_numeric_indicator_can_use_sum(self):
         """المؤشر الرقمي يمكنه استخدام طريقة تجميع 'مجموع'"""
-        indicator = IndicatorFactory.build(
+        indicator = IndicatorFactory(
             unit_type="number",
             accumulation_type="sum",
         )
@@ -36,7 +37,7 @@ class TestIndicatorValidation:
 
     def test_numeric_indicator_can_use_average(self):
         """المؤشر الرقمي يمكنه استخدام طريقة تجميع 'متوسط'"""
-        indicator = IndicatorFactory.build(
+        indicator = IndicatorFactory(
             unit_type="number",
             accumulation_type="average",
         )

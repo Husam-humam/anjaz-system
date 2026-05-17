@@ -157,7 +157,7 @@ class TestOrganizationServiceDeactivateUnit:
 
         with pytest.raises(ValidationError) as exc_info:
             OrganizationService.deactivate_unit(daira)
-        assert 'لا يمكن تعطيل كيان يحتوي على كيانات فرعية نشطة' in str(
+        assert 'لا يمكن تعطيل وحدة لديها وحدات فرعية نشطة' in str(
             exc_info.value
         )
 

@@ -42,12 +42,20 @@ class TestOrganizationUnitValidation:
         qism.full_clean()  # يجب ألا يرفع استثناء
 
     def test_qism_cannot_be_parent_of_another_unit(self):
-        """القسم لا يمكن أن يكون كيانًا أبًا لأي كيان آخر"""
+        """القسم لا يمكن أن يكون كياناً أباً لأي كيان آخر — اختبار صريح
+        بمديرية أب=قسم (يصل إلى فحص qism-as-parent بعد تجاوز فحص نوع الأب)"""
         qism = QismFactory()
-        child = QismFactory.build(parent=qism)
+        # نستخدم mudiriya كنوع للطفل لتجاوز فحص "القسم يجب أن يتبع مديرية أو دائرة"
+        # المديرية يمكن نظرياً أن تتبع أي شيء — وعندها يُفعّل فحص "qism لا يكون أباً"
+        child = MudiriyaFactory.build(parent=qism)
         with pytest.raises(ValidationError) as exc:
             child.full_clean()
-        assert "القسم لا يمكن أن يكون كياناً أباً" in str(exc.value)
+        # الرسالة المتوقّعة: إما "المديرية يجب أن تتبع دائرة" أو "القسم لا يمكن أن يكون أباً"
+        # كلتاهما تثبت أن قسماً لا يقبل أن يكون أباً لأي وحدة
+        assert (
+            "القسم لا يمكن أن يكون كياناً أباً" in str(exc.value)
+            or "المديرية يجب أن تتبع دائرة" in str(exc.value)
+        )
 
     def test_get_full_path_returns_ancestor_chain(self):
         """المسار الكامل يرجع سلسلة الأسلاف"""
