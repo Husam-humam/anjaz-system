@@ -1,6 +1,7 @@
 """
 طبقة العرض (Views) لتطبيق الحسابات — نقاط نهاية المصادقة وإدارة المستخدمين.
 """
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import permissions, status, viewsets
@@ -15,8 +16,14 @@ from apps.organization.permissions import IsStatisticsAdmin
 
 
 class LoginThrottle(AnonRateThrottle):
-    """تحديد معدل محاولات تسجيل الدخول"""
-    rate = '5/minute'
+    """
+    تحديد معدل محاولات تسجيل الدخول لكل عنوان IP.
+
+    - يقرأ الـ rate من DRF settings: `DEFAULT_THROTTLE_RATES['login']`
+      (والذي يأتي بدوره من متغيّر البيئة `LOGIN_THROTTLE_RATE`).
+    - يقرأ الـ scope='login' فيستخدم DRF cache المُهيَّأ في settings.
+    """
+    scope = 'login'
 
 from .serializers import (
     ChangePasswordSerializer,
@@ -36,9 +43,15 @@ class LoginView(APIView):
     """
     تسجيل الدخول — POST /api/auth/login/
     يتحقق من بيانات الاعتماد ويُرجع توكنات JWT مع معلومات المستخدم.
+
+    Rate limit يُطبَّق فقط لو `LOGIN_THROTTLE_ENABLED=True` في .env.
     """
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [LoginThrottle]
+    throttle_classes = (
+        [LoginThrottle]
+        if getattr(settings, 'LOGIN_THROTTLE_ENABLED', True)
+        else []
+    )
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)

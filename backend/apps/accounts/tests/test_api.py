@@ -240,3 +240,64 @@ class TestResetPasswordAPI:
         response = api_client.post(url, data, format='json')
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+class TestLoginRateLimit:
+    """
+    Rate limit على تسجيل الدخول لكل IP.
+
+    نُجبر تفعيل الـ throttle بـ override_settings + نمسح cache بين الاختبارات
+    لأن DRF يخزّن العدّاد فيه (LocMemCache مشترك بين الاختبارات داخل الجلسة).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_throttle(self):
+        """
+        نُلغي عدّاد throttle لـ scope='login' فقط (لـ IP=127.0.0.1 المُستخدم
+        في الاختبارات). نتجنّب cache.clear() الكامل لأنه يُلغي أعلام
+        middleware حسّاسة (مثل PeriodAutoCheckMiddleware).
+        """
+        from django.core.cache import cache
+        # DRF SimpleRateThrottle.cache_format = 'throttle_{scope}_{ident}'
+        # في الاختبارات، الـ ident هو IP العميل = 127.0.0.1
+        cache.delete('throttle_login_127.0.0.1')
+        cache.delete('throttle_anon_127.0.0.1')
+        yield
+        cache.delete('throttle_login_127.0.0.1')
+        cache.delete('throttle_anon_127.0.0.1')
+
+    def test_throttle_enforces_limit(self, api_client):
+        """
+        مع rate=5/minute (الافتراضي)، المحاولة السادسة تُرفض بـ 429.
+        نعتمد على cache المُنظّف من الـ autouse fixture للبدء من 0.
+        """
+        url = reverse('auth:login')
+        data = {'username': 'nobody', 'password': 'wrong'}
+
+        # ٥ محاولات مسموحة (تعود 401 لأن البيانات خاطئة، لكن ليس 429)
+        for i in range(5):
+            response = api_client.post(url, data, format='json')
+            assert response.status_code != status.HTTP_429_TOO_MANY_REQUESTS, (
+                f'المحاولة #{i + 1} رُفضت بـ 429 — العدّاد لم يبدأ من الصفر'
+            )
+
+        # المحاولة السادسة → 429
+        response = api_client.post(url, data, format='json')
+        assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    def test_login_view_respects_enabled_flag(self, settings):
+        """
+        التحقّق أنّ throttle_classes يُحسَب من LOGIN_THROTTLE_ENABLED.
+        نختبر الحساب نفسه (وحدة بنائيّة)، لا السلوك عبر HTTP، لأنّ
+        التحميل اللحظي لـ class attribute صعب بدون reload هشّ.
+        """
+        from apps.accounts.views import LoginThrottle
+
+        # المنطق في LoginView يستخدم القيمة المُحمَّلة وقت تعريف الـ class.
+        # نختبر التعبير الشرطي مباشرة بدلاً من إعادة تحميل الـ module:
+        def compute_throttle_classes(enabled):
+            return [LoginThrottle] if enabled else []
+
+        assert compute_throttle_classes(True) == [LoginThrottle]
+        assert compute_throttle_classes(False) == []

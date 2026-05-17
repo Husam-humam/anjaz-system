@@ -151,7 +151,26 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '20/minute',
         'user': '60/minute',
-        'login': '5/minute',
+        # معدّل محاولات تسجيل الدخول لكل عنوان IP — قابل للضبط من .env.
+        # القيمة بصيغة DRF: 'N/period' حيث period ∈ second/minute/hour/day.
+        # مثلاً: '5/minute' = ٥ محاولات في الدقيقة لكل IP.
+        'login': env('LOGIN_THROTTLE_RATE', default='5/minute'),
+    },
+}
+
+# تفعيل/تعطيل rate limit على تسجيل الدخول — قابل للضبط من .env.
+# اتركه True في الإنتاج. عطّله مؤقتاً في التطوير لو احتجت محاولات سريعة.
+LOGIN_THROTTLE_ENABLED = env.bool('LOGIN_THROTTLE_ENABLED', default=True)
+
+# Django cache — مطلوب لـ DRF throttling لتتبّع عداد IP عبر الطلبات.
+# في الإنتاج: استخدم Redis. للتطوير: local memory cache كافٍ.
+CACHES = {
+    'default': {
+        'BACKEND': env(
+            'CACHE_BACKEND',
+            default='django.core.cache.backends.locmem.LocMemCache',
+        ),
+        'LOCATION': env('CACHE_LOCATION', default='anjaz-default-cache'),
     },
 }
 
