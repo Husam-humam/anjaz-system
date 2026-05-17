@@ -10,6 +10,7 @@ from apps.organization.tests.factories import (
     QismFactory,
     SupervisedQismFactory,
 )
+from apps.targets.models import Target
 from .factories import TargetFactory
 
 
@@ -20,11 +21,10 @@ class TestTargetValidation:
     def test_target_value_must_be_positive(self):
         """القيمة المستهدفة يجب أن تكون أكبر من صفر"""
         qism = QismFactory()
-        indicator = IndicatorFactory(
-            unit_type="number", accumulation_type="sum"
-        )
         target = TargetFactory.build(
-            scope_unit=qism, indicator=indicator, target_value=0
+            name="مستهدف اختبار",
+            scope_unit=qism,
+            target_value=0,
         )
         with pytest.raises(ValidationError) as exc:
             target.full_clean()
@@ -33,11 +33,10 @@ class TestTargetValidation:
     def test_negative_target_value_is_invalid(self):
         """القيمة المستهدفة السالبة غير صالحة"""
         qism = QismFactory()
-        indicator = IndicatorFactory(
-            unit_type="number", accumulation_type="sum"
-        )
         target = TargetFactory.build(
-            scope_unit=qism, indicator=indicator, target_value=-10
+            name="مستهدف اختبار",
+            scope_unit=qism,
+            target_value=-10,
         )
         with pytest.raises(ValidationError) as exc:
             target.full_clean()
@@ -50,41 +49,47 @@ class TestTargetValidation:
             unit_type="number", accumulation_type="sum"
         )
         target = TargetFactory(
-            scope_unit=qism, indicator=indicator, target_value=50.0
+            scope_unit=qism, indicators=[indicator], target_value=50.0
         )
         assert target.pk is not None
 
     def test_text_indicator_cannot_have_target(self):
         """المؤشر النصي لا يمكن تحديد مستهدف له"""
-        qism = QismFactory()
+        qism = SupervisedQismFactory()
         text_indicator = IndicatorFactory(
             unit_type="text",
             accumulation_type="last_value",
         )
-        target = TargetFactory.build(
+        # المؤشر النصي يُرفَض في validate_components (M2M بعد الحفظ)
+        target = Target.objects.create(
+            name="مستهدف نصّي",
             scope_unit=qism,
-            indicator=text_indicator,
+            year=2026,
             target_value=100,
         )
         with pytest.raises(ValidationError) as exc:
-            target.full_clean()
-        assert 'indicator' in exc.value.message_dict
+            target.validate_components([text_indicator])
+        assert 'indicators' in exc.value.message_dict
         assert any(
-            'نصي' in msg for msg in exc.value.message_dict['indicator']
+            'نصّيّة' in msg or 'نصي' in msg
+            for msg in exc.value.message_dict['indicators']
         )
 
-    def test_target_str_includes_scope_and_indicator(self):
-        """__str__ يرجع اسم النطاق والمؤشر والسنة"""
+    def test_target_str_includes_scope_and_name(self):
+        """__str__ يرجع اسم النطاق والمستهدف والسنة"""
         qism = SupervisedQismFactory()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
         target = TargetFactory(
-            scope_unit=qism, indicator=indicator, year=2025
+            name="إعداد التقارير",
+            scope_unit=qism,
+            indicators=[indicator],
+            year=2025,
         )
         result = str(target)
         assert qism.name in result
-        assert indicator.name in result
+        assert "إعداد التقارير" in result
         assert "2025" in result
 
     def test_institution_level_target_str(self):
@@ -93,7 +98,7 @@ class TestTargetValidation:
             unit_type="number", accumulation_type="sum"
         )
         target = TargetFactory(
-            scope_unit=None, indicator=indicator, year=2025
+            scope_unit=None, indicators=[indicator], year=2025
         )
         result = str(target)
         assert "المؤسسة كاملة" in result
@@ -108,7 +113,7 @@ class TestHierarchicalScope:
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
-        target = TargetFactory(scope_unit=None, indicator=indicator)
+        target = TargetFactory(scope_unit=None, indicators=[indicator])
         assert target.scope_unit is None
         assert target.scope_level == 'institution'
 
@@ -118,7 +123,7 @@ class TestHierarchicalScope:
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
-        target = TargetFactory(scope_unit=daira, indicator=indicator)
+        target = TargetFactory(scope_unit=daira, indicators=[indicator])
         assert target.scope_level == 'daira'
 
     def test_mudiriya_level_target_allowed(self):
@@ -127,7 +132,7 @@ class TestHierarchicalScope:
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
-        target = TargetFactory(scope_unit=mudiriya, indicator=indicator)
+        target = TargetFactory(scope_unit=mudiriya, indicators=[indicator])
         assert target.scope_level == 'mudiriya'
 
     def test_qism_level_target_allowed(self):
@@ -141,11 +146,9 @@ class TestHierarchicalScope:
         planning_qism = PlanningQismFactory()
         # بعد Phase F: قسم التخطيط يُحدَّد عبر PlanningAssignment
         PlanningAssignment.objects.create(planning_unit=planning_qism)
-        indicator = IndicatorFactory(
-            unit_type="number", accumulation_type="sum"
-        )
         target = TargetFactory.build(
-            scope_unit=planning_qism, indicator=indicator
+            name="مستهدف غير صالح",
+            scope_unit=planning_qism,
         )
         with pytest.raises(ValidationError) as exc:
             target.full_clean()
@@ -158,11 +161,15 @@ class TestHierarchicalScope:
         lv_indicator = IndicatorFactory(
             unit_type="number", accumulation_type="last_value"
         )
-        target = TargetFactory.build(
-            scope_unit=mudiriya, indicator=lv_indicator
+        # last_value يُرفَض في validate_components (M2M بعد الحفظ)
+        target = Target.objects.create(
+            name="مستهدف آخر قيمة",
+            scope_unit=mudiriya,
+            year=2026,
+            target_value=100,
         )
         with pytest.raises(ValidationError) as exc:
-            target.full_clean()
+            target.validate_components([lv_indicator])
         assert "آخر قيمة" in str(exc.value)
 
     def test_last_value_indicator_at_institution_level_rejected(self):
@@ -170,11 +177,14 @@ class TestHierarchicalScope:
         lv_indicator = IndicatorFactory(
             unit_type="number", accumulation_type="last_value"
         )
-        target = TargetFactory.build(
-            scope_unit=None, indicator=lv_indicator
+        target = Target.objects.create(
+            name="مستهدف آخر قيمة مؤسسة",
+            scope_unit=None,
+            year=2026,
+            target_value=100,
         )
         with pytest.raises(ValidationError) as exc:
-            target.full_clean()
+            target.validate_components([lv_indicator])
         assert "آخر قيمة" in str(exc.value)
 
     def test_last_value_indicator_at_qism_level_allowed(self):
@@ -183,36 +193,62 @@ class TestHierarchicalScope:
         lv_indicator = IndicatorFactory(
             unit_type="number", accumulation_type="last_value"
         )
-        target = TargetFactory(scope_unit=qism, indicator=lv_indicator)
-        target.full_clean()  # يجب ألا يرفع استثناء
+        target = TargetFactory(scope_unit=qism, indicators=[lv_indicator])
+        # validate_components يجب ألّا يرفع استثناء على مستوى القسم
+        target.validate_components([lv_indicator])
 
 
 @pytest.mark.django_db
 class TestUniqueConstraint:
-    """اختبارات فريدة القيد (scope_unit, indicator, year)"""
+    """اختبارات تفرّد اسم المستهدف داخل (scope_unit, year)"""
 
-    def test_cannot_duplicate_qism_target(self):
-        """لا يمكن إنشاء مستهدفين لنفس القسم والمؤشر والسنة"""
-        target1 = TargetFactory(scope_unit=SupervisedQismFactory())
-        with pytest.raises(Exception):
-            TargetFactory(
-                scope_unit=target1.scope_unit,
-                indicator=target1.indicator,
-                year=target1.year,
-            )
-
-    def test_cannot_duplicate_institution_target(self):
-        """لا يمكن إنشاء مستهدفين على مستوى المؤسسة لنفس المؤشر والسنة"""
+    def test_cannot_duplicate_name_in_same_scope_and_year(self):
+        """لا يمكن إنشاء مستهدفين بنفس الاسم في نفس القسم والسنة"""
+        qism = SupervisedQismFactory()
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
-        TargetFactory(scope_unit=None, indicator=indicator, year=2026)
+        TargetFactory(
+            name="إعداد التقارير",
+            scope_unit=qism,
+            indicators=[indicator],
+            year=2026,
+        )
+        # محاولة إنشاء مستهدف ثانٍ بنفس الاسم/النطاق/السنة → فشل
+        # validate_components يُجري الفحص.
+        second = Target.objects.create(
+            name="إعداد التقارير",
+            scope_unit=qism,
+            year=2026,
+            target_value=50,
+        )
         with pytest.raises(ValidationError) as exc:
-            TargetFactory(scope_unit=None, indicator=indicator, year=2026)
-        assert "يوجد مسبقاً مستهدف على مستوى المؤسسة" in str(exc.value)
+            second.validate_components([indicator])
+        assert 'name' in exc.value.message_dict
 
-    def test_same_indicator_different_scope_levels_allowed(self):
-        """نفس المؤشر يمكن أن يكون له مستهدفات على مستويات مختلفة"""
+    def test_cannot_duplicate_institution_name(self):
+        """لا يمكن إنشاء مستهدفين بنفس الاسم على مستوى المؤسسة لنفس السنة"""
+        indicator = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        TargetFactory(
+            name="مستهدف مؤسسي",
+            scope_unit=None,
+            indicators=[indicator],
+            year=2026,
+        )
+        second = Target.objects.create(
+            name="مستهدف مؤسسي",
+            scope_unit=None,
+            year=2026,
+            target_value=100,
+        )
+        with pytest.raises(ValidationError) as exc:
+            second.validate_components([indicator])
+        assert 'name' in exc.value.message_dict
+
+    def test_same_name_different_scope_levels_allowed(self):
+        """نفس اسم المستهدف يمكن أن يكون له مستهدفات على مستويات مختلفة"""
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
@@ -220,9 +256,21 @@ class TestUniqueConstraint:
         mudiriya = MudiriyaFactory(parent=daira)
         qism = SupervisedQismFactory(parent=mudiriya)
 
-        # ثلاث مستهدفات مختلفة لنفس المؤشر والسنة
-        TargetFactory(scope_unit=None, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=daira, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=mudiriya, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=qism, indicator=indicator, year=2026)
-        # لا يجب أن ترفع أي أخطاء
+        # أربع مستهدفات بنفس الاسم على نطاقات مختلفة وسنة واحدة
+        TargetFactory(
+            name="إعداد التقارير", scope_unit=None,
+            indicators=[indicator], year=2026,
+        )
+        TargetFactory(
+            name="إعداد التقارير", scope_unit=daira,
+            indicators=[indicator], year=2026,
+        )
+        TargetFactory(
+            name="إعداد التقارير", scope_unit=mudiriya,
+            indicators=[indicator], year=2026,
+        )
+        TargetFactory(
+            name="إعداد التقارير", scope_unit=qism,
+            indicators=[indicator], year=2026,
+        )
+        # لا يجب أن ترفع أي أخطاء — التفرّد يكون داخل (scope_unit, year, name)

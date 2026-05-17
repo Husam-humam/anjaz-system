@@ -83,18 +83,36 @@ export type TargetScopeLevel =
   | "mudiriya"
   | "qism";
 
+/** مكوّن واحد ضمن مستهدف مركّب */
+export interface TargetIndicatorComponent {
+  id: number;
+  name: string;
+  unit_type: string;
+  accumulation_type: string;
+  category: number | null;
+  category_name: string | null;
+}
+
+/** نتيجة حساب قيمة مكوّن واحد في تفاصيل التقدّم */
+export interface TargetProgressComponent {
+  indicator_id: number;
+  indicator_name: string;
+  unit_type: string;
+  accumulation_type: string;
+  value: number;
+}
+
 export interface Target {
   id: number;
+  name: string;
   scope_unit: number | null; // null => مستوى المؤسسة
   scope_unit_name: string | null;
   scope_unit_type: string | null;
   scope_level: TargetScopeLevel;
-  indicator: number;
-  indicator_name: string;
-  indicator_unit_type: string;
-  indicator_accumulation_type: string;
-  indicator_category: number | null;
-  indicator_category_name: string | null;
+  /** مؤشّرات المكوّنات — مستهدف مركّب فيه واحد أو أكثر */
+  indicators: TargetIndicatorComponent[];
+  /** الوحدة الموحّدة (كل المكوّنات بنفس النوع) */
+  unit_type: string | null;
   year: number;
   target_value: number;
   notes: string;
@@ -109,13 +127,13 @@ export interface Target {
     remaining: number;
     progress_percentage: number;
     qisms_in_scope: number;
+    components: TargetProgressComponent[];
   } | null;
 }
 
 export interface TargetProgressData {
   target_id: number;
-  indicator_name: string;
-  indicator_accumulation_type: string;
+  target_name: string;
   scope_unit_name: string;
   scope_level: TargetScopeLevel;
   year: number;
@@ -124,6 +142,7 @@ export interface TargetProgressData {
   remaining: number;
   progress_percentage: number;
   qisms_in_scope: number;
+  components: TargetProgressComponent[];
 }
 
 /** عقدة في شجرة التفصيل (مؤسسة/دائرة/مديرية/قسم) */
@@ -141,7 +160,7 @@ export interface TargetBreakdownNode {
 
 export interface TargetBreakdown {
   target_id: number;
-  indicator_name: string;
+  target_name: string;
   scope_unit_name: string;
   scope_level: TargetScopeLevel;
   year: number;
@@ -149,6 +168,7 @@ export interface TargetBreakdown {
   cumulative_value: number;
   progress_percentage: number;
   qisms_in_scope: number;
+  components: TargetProgressComponent[];
   breakdown: TargetBreakdownNode[];
   breakdown_type: "tree" | "none";
 }

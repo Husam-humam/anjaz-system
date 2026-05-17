@@ -1,11 +1,11 @@
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.organization.models import OrganizationUnit
 from apps.organization.permissions import IsStatisticsAdminOrReadOnly
 
 from .models import Target
@@ -47,19 +47,18 @@ def _service_error_response(exc):
 
 class TargetViewSet(viewsets.ModelViewSet):
     """
-    إدارة المستهدفات الهرمية.
+    إدارة المستهدفات المركّبة الهرميّة.
 
-    المستهدفات تُدار فقط من قبل مدير قسم الإحصاء (CRUD).
-    المستخدمون الآخرون يرون المستهدفات ضمن نطاقهم (للقراءة فقط).
+    CRUD محصور بمدير قسم الإحصاء. باقي المستخدمين قراءة فقط ضمن نطاقهم.
     """
     serializer_class = TargetSerializer
     permission_classes = [IsAuthenticated, IsStatisticsAdminOrReadOnly]
     filterset_fields = [
-        'scope_unit', 'indicator', 'indicator__category', 'year',
+        'scope_unit', 'indicators', 'indicators__category', 'year',
     ]
     search_fields = [
-        'scope_unit__name', 'scope_unit__code',
-        'indicator__name', 'notes',
+        'name', 'scope_unit__name', 'scope_unit__code',
+        'indicators__name', 'notes',
     ]
 
     def get_serializer_context(self):
@@ -73,10 +72,10 @@ class TargetViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Target.objects.select_related(
-            'scope_unit', 'scope_unit__parent',
-            'indicator', 'indicator__category',
-            'set_by',
-        ).order_by('-year', 'indicator__category__name', 'scope_unit__name')
+            'scope_unit', 'scope_unit__parent', 'set_by',
+        ).prefetch_related(
+            'indicators', 'indicators__category',
+        ).order_by('-year', 'scope_unit__name', 'name')
 
         user = self.request.user
 
@@ -84,21 +83,16 @@ class TargetViewSet(viewsets.ModelViewSet):
         if user.role == 'statistics_admin':
             pass  # نطاق كامل
         elif user.role == 'planning_section':
-            # يرى المستهدفات التي تتقاطع مع مديريته:
-            # - مستهدفات المؤسسة (scope_unit = null) — يراها الجميع
-            # - مستهدفات مديريته أو دائرة مديريته أو أقسامها
             if user.unit and user.unit.parent:
                 directorate = user.unit.parent
                 descendant_ids = list(
                     directorate.get_descendants(include_self=True)
                     .values_list('id', flat=True)
                 )
-                # أضف أيضاً أجداد المديرية (لو كانت داخل دائرة) ليراها المخطط
                 ancestor_ids = list(
                     directorate.get_ancestors().values_list('id', flat=True)
                 )
                 visible_ids = set(descendant_ids) | set(ancestor_ids)
-                from django.db.models import Q
                 queryset = queryset.filter(
                     Q(scope_unit__isnull=True) |
                     Q(scope_unit_id__in=visible_ids)
@@ -106,11 +100,6 @@ class TargetViewSet(viewsets.ModelViewSet):
             else:
                 queryset = queryset.filter(scope_unit__isnull=True)
         elif user.role == 'section_manager':
-            # مدير القسم يرى:
-            # - مستهدفات قسمه المباشرة
-            # - مستهدفات أجداد قسمه (المديرية/الدائرة التي يتبعها)
-            # - مستهدفات المؤسسة الكلية
-            from django.db.models import Q
             if user.unit:
                 ancestors_ids = list(
                     user.unit.get_ancestors(include_self=False)
@@ -123,6 +112,9 @@ class TargetViewSet(viewsets.ModelViewSet):
                 )
             else:
                 queryset = queryset.filter(scope_unit__isnull=True)
+        elif user.role == 'viewer':
+            # viewer: من خلال ViewScope (تُفحَص في طبقة أخرى لو احتجنا)
+            return queryset.none()
         else:
             return queryset.none()
 
@@ -136,14 +128,19 @@ class TargetViewSet(viewsets.ModelViewSet):
                 scope_unit__unit_type=scope_level,
             )
 
-        return queryset
+        return queryset.distinct()  # distinct بسبب JOIN على indicators
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        # نفصل indicators عن باقي الحقول (الـ service يطلبها كقائمة منفصلة)
+        indicators = data.pop('indicators', [])
+        indicator_ids = [ind.id for ind in indicators]
         try:
             target = TargetService.create_target(
-                data=serializer.validated_data,
+                data=data,
+                indicator_ids=indicator_ids,
                 set_by=request.user,
             )
         except (DjangoValidationError, DjangoPermissionDenied) as exc:
@@ -158,9 +155,17 @@ class TargetViewSet(viewsets.ModelViewSet):
             instance, data=request.data, partial=partial
         )
         serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        indicators = data.pop('indicators', None)
+        indicator_ids = (
+            [ind.id for ind in indicators] if indicators is not None else None
+        )
         try:
             target = TargetService.update_target(
-                instance, serializer.validated_data, actor=request.user,
+                instance,
+                data,
+                indicator_ids=indicator_ids,
+                actor=request.user,
             )
         except (DjangoValidationError, DjangoPermissionDenied) as exc:
             return _service_error_response(exc)
@@ -168,7 +173,6 @@ class TargetViewSet(viewsets.ModelViewSet):
         return Response(output.data)
 
     def destroy(self, request, *args, **kwargs):
-        """حذف مستهدف — يُسجَّل في سجلّ التدقيق."""
         instance = self.get_object()
         try:
             TargetService.delete_target(instance, actor=request.user)
@@ -178,10 +182,7 @@ class TargetViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='progress')
     def progress(self, request, pk=None):
-        """
-        GET /api/targets/{id}/progress/
-        يُرجع حساب التقدم لمستهدف واحد (القيمة التراكمية، النسبة، إلخ).
-        """
+        """تقدّم المستهدف المركّب + تفصيل كل مكوّن."""
         target = self.get_object()
         try:
             data = TargetService.compute_target_progress(target)
@@ -189,10 +190,8 @@ class TargetViewSet(viewsets.ModelViewSet):
             return _service_error_response(
                 DjangoValidationError(str(exc))
             )
-        # أضف معلومات أساسية عن المستهدف للمساعدة في العرض
         data['target_id'] = target.id
-        data['indicator_name'] = target.indicator.name
-        data['indicator_accumulation_type'] = target.indicator.accumulation_type
+        data['target_name'] = target.name
         data['scope_unit_name'] = (
             target.scope_unit.name if target.scope_unit_id else 'المؤسسة كاملة'
         )
@@ -202,15 +201,7 @@ class TargetViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='breakdown')
     def breakdown(self, request, pk=None):
-        """
-        GET /api/targets/{id}/breakdown/
-        يُرجع تفصيل مساهمة الوحدات التنظيمية في تحقيق مستهدف هرمي،
-        كشجرة قابلة للتوسيع:
-        - مستهدف مؤسسة: جذور = دوائر + مديريات يتيمة
-        - مستهدف دائرة: جذور = أبناء الدائرة المباشرة
-        - مستهدف مديرية: جذور = أقسام المديرية
-        - مستهدف قسم: قائمة فارغة (لا تفصيل).
-        """
+        """تفصيل مساهمة الوحدات في تحقيق المستهدف (شجرة هرميّة)."""
         target = self.get_object()
         if target.scope_unit_id and target.scope_unit.unit_type == 'qism':
             return Response({
@@ -228,7 +219,7 @@ class TargetViewSet(viewsets.ModelViewSet):
             )
         return Response({
             'target_id': target.id,
-            'indicator_name': target.indicator.name,
+            'target_name': target.name,
             'scope_unit_name': (
                 target.scope_unit.name if target.scope_unit_id else 'المؤسسة كاملة'
             ),
@@ -238,6 +229,7 @@ class TargetViewSet(viewsets.ModelViewSet):
             'cumulative_value': progress['cumulative_value'],
             'progress_percentage': progress['progress_percentage'],
             'qisms_in_scope': progress['qisms_in_scope'],
+            'components': progress['components'],
             'breakdown': tree,
             'breakdown_type': 'tree',
         })

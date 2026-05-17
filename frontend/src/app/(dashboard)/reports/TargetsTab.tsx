@@ -288,19 +288,53 @@ export function TargetsTab({ filters }: Props) {
                         className="hover:bg-gray-50 transition"
                       >
                         <td className="py-3 px-4 font-medium text-gray-900">
-                          {target.indicator_name}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{target.name}</span>
+                            {target.indicators.length > 1 && (
+                              <span
+                                className="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                title={target.indicators
+                                  .map((i) => i.name)
+                                  .join("، ")}
+                              >
+                                {target.indicators.length.toLocaleString(
+                                  "ar-IQ"
+                                )}{" "}
+                                مكوّنات
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-gray-700">
                           {target.scope_unit_name || "المؤسسة كاملة"}
                         </td>
                         <td className="py-3 px-4">
-                          {target.indicator_category_name ? (
-                            <span className="inline-block px-2 py-0.5 rounded-md text-xs bg-gray-100 text-gray-700">
-                              {target.indicator_category_name}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
+                          {(() => {
+                            const cats = Array.from(
+                              new Set(
+                                target.indicators
+                                  .map((i) => i.category_name)
+                                  .filter((n): n is string => !!n)
+                              )
+                            );
+                            if (cats.length === 0) {
+                              return (
+                                <span className="text-xs text-gray-400">—</span>
+                              );
+                            }
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                {cats.map((name) => (
+                                  <span
+                                    key={name}
+                                    className="inline-block px-2 py-0.5 rounded-md text-xs bg-gray-100 text-gray-700"
+                                  >
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-4 text-gray-700" dir="ltr">
                           {target.progress ? (

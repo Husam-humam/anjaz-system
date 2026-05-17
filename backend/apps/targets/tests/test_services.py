@@ -1,6 +1,6 @@
 """
 اختبارات خدمات المستهدفات — TargetService.
-تغطي: CRUD، حساب التقدم الهرمي، تفصيل مساهمة الأقسام.
+تغطي: CRUD، حساب التقدم الهرمي، تفصيل مساهمة الأقسام، مستهدفات مركّبة.
 """
 import pytest
 from django.core.exceptions import ValidationError
@@ -46,17 +46,20 @@ class TestTargetServiceCRUD:
             unit_type="number", accumulation_type="sum"
         )
         data = {
+            'name': 'مستهدف قسم',
             'scope_unit': qism,
-            'indicator': indicator,
             'year': 2026,
             'target_value': 150.0,
             'notes': 'مستهدف اختبار',
         }
-        target = TargetService.create_target(data, set_by=admin)
+        target = TargetService.create_target(
+            data, indicator_ids=[indicator.id], set_by=admin,
+        )
         assert target.pk is not None
         assert target.scope_unit == qism
         assert target.scope_level == 'qism'
         assert target.set_by == admin
+        assert list(target.indicators.all()) == [indicator]
 
     def test_create_institution_target(self):
         """إنشاء مستهدف على مستوى المؤسسة"""
@@ -65,12 +68,14 @@ class TestTargetServiceCRUD:
             unit_type="number", accumulation_type="sum"
         )
         data = {
+            'name': 'مستهدف مؤسسي',
             'scope_unit': None,
-            'indicator': indicator,
             'year': 2026,
             'target_value': 1000.0,
         }
-        target = TargetService.create_target(data, set_by=admin)
+        target = TargetService.create_target(
+            data, indicator_ids=[indicator.id], set_by=admin,
+        )
         assert target.scope_unit is None
         assert target.scope_level == 'institution'
 
@@ -82,32 +87,38 @@ class TestTargetServiceCRUD:
             unit_type="number", accumulation_type="sum"
         )
         data = {
+            'name': 'مستهدف دائرة',
             'scope_unit': daira,
-            'indicator': indicator,
             'year': 2026,
             'target_value': 400.0,
         }
-        target = TargetService.create_target(data, set_by=admin)
+        target = TargetService.create_target(
+            data, indicator_ids=[indicator.id], set_by=admin,
+        )
         assert target.scope_level == 'daira'
 
     def test_create_target_with_zero_value_fails(self):
         """فشل إنشاء مستهدف بقيمة صفر"""
         admin = StatisticsAdminFactory()
-        qism = QismFactory()
+        qism = _make_supervised_qism()
         indicator = IndicatorFactory()
         data = {
+            'name': 'مستهدف صفر',
             'scope_unit': qism,
-            'indicator': indicator,
             'year': 2026,
             'target_value': 0,
         }
         with pytest.raises(ValidationError) as exc_info:
-            TargetService.create_target(data, set_by=admin)
+            TargetService.create_target(
+                data, indicator_ids=[indicator.id], set_by=admin,
+            )
         assert 'target_value' in exc_info.value.message_dict
 
     def test_update_target(self):
         """تحديث مستهدف"""
-        target = TargetFactory(scope_unit=_make_supervised_qism(), target_value=100.0)
+        target = TargetFactory(
+            scope_unit=_make_supervised_qism(), target_value=100.0,
+        )
         updated = TargetService.update_target(target, {'target_value': 200.0})
         assert updated.target_value == 200.0
 
@@ -117,6 +128,58 @@ class TestTargetServiceCRUD:
         pk = target.pk
         TargetService.delete_target(target)
         assert not Target.objects.filter(pk=pk).exists()
+
+
+@pytest.mark.django_db
+class TestCompositeTargets:
+    """اختبارات المستهدفات المركّبة (M2M indicators)"""
+
+    def test_create_composite_target_with_two_indicators(self):
+        """مستهدف مركّب من مؤشّرين بنفس الـ unit_type يُنشَأ بنجاح."""
+        admin = StatisticsAdminFactory()
+        qism = _make_supervised_qism()
+        ind1 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        ind2 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        data = {
+            'name': 'إعداد التقارير',
+            'scope_unit': qism,
+            'year': 2026,
+            'target_value': 200.0,
+        }
+        target = TargetService.create_target(
+            data, indicator_ids=[ind1.id, ind2.id], set_by=admin,
+        )
+        assert target.pk is not None
+        bound_ids = set(target.indicators.values_list('id', flat=True))
+        assert bound_ids == {ind1.id, ind2.id}
+
+    def test_reject_mixed_unit_types(self):
+        """مستهدف بمكوّنات مختلفة الـ unit_type يُرفَض."""
+        admin = StatisticsAdminFactory()
+        qism = _make_supervised_qism()
+        ind_number = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        ind_percentage = IndicatorFactory(
+            unit_type="percentage", accumulation_type="average"
+        )
+        data = {
+            'name': 'مستهدف مختلط',
+            'scope_unit': qism,
+            'year': 2026,
+            'target_value': 100.0,
+        }
+        with pytest.raises(ValidationError) as exc_info:
+            TargetService.create_target(
+                data,
+                indicator_ids=[ind_number.id, ind_percentage.id],
+                set_by=admin,
+            )
+        assert 'indicators' in exc_info.value.message_dict
 
 
 @pytest.mark.django_db
@@ -218,7 +281,7 @@ class TestTargetProgress:
         self._create_submission_with_value(qism, indicator, 20, week=2)
 
         target = TargetFactory(
-            scope_unit=qism, indicator=indicator,
+            scope_unit=qism, indicators=[indicator],
             year=2026, target_value=100,
         )
         progress = TargetService.compute_target_progress(target)
@@ -241,7 +304,7 @@ class TestTargetProgress:
         self._create_submission_with_value(q2, indicator, 40)
 
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=100,
         )
         progress = TargetService.compute_target_progress(target)
@@ -262,7 +325,7 @@ class TestTargetProgress:
         self._create_submission_with_value(q2, indicator, 90)
 
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=95,
         )
         progress = TargetService.compute_target_progress(target)
@@ -279,12 +342,43 @@ class TestTargetProgress:
             unit_type="number", accumulation_type="sum"
         )
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=100,
         )
         progress = TargetService.compute_target_progress(target)
         assert progress['cumulative_value'] == 0
         assert progress['progress_percentage'] == 0
+
+    def test_aggregate_sums_all_components(self):
+        """مستهدف مركّب من مكوّنين: التقدّم الكلي = مجموع المكوّنات."""
+        qism = _make_supervised_qism()
+        ind1 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        ind2 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        # إجابات للمكوّن الأول: 30+20 = 50
+        self._create_submission_with_value(qism, ind1, 30, week=1)
+        self._create_submission_with_value(qism, ind1, 20, week=2)
+        # إجابات للمكوّن الثاني: 15+25 = 40
+        # نستخدم أسابيع مختلفة لتجنّب تكرار (qism, period) في WeeklySubmission
+        self._create_submission_with_value(qism, ind2, 15, week=3)
+        self._create_submission_with_value(qism, ind2, 25, week=4)
+
+        target = TargetFactory(
+            scope_unit=qism, indicators=[ind1, ind2],
+            year=2026, target_value=200,
+        )
+        progress = TargetService.compute_target_progress(target)
+
+        # الإجمالي = 50 (ind1) + 40 (ind2) = 90
+        assert progress['cumulative_value'] == 90
+        # تفصيل المكوّنات موجود
+        assert len(progress['components']) == 2
+        comp_values = {c['indicator_id']: c['value'] for c in progress['components']}
+        assert comp_values[ind1.id] == 50
+        assert comp_values[ind2.id] == 40
 
 
 @pytest.mark.django_db
@@ -338,7 +432,7 @@ class TestScopeBreakdown:
         self._create_submission_with_value(q2, indicator, 40)
 
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=200,
         )
         breakdown = TargetService.compute_scope_breakdown(target)
@@ -367,7 +461,7 @@ class TestScopeBreakdown:
         self._create_submission_with_value(q2, indicator, 40)  # 40% من 100
 
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=200,  # المحقّق 100 من 200 = 50%
         )
         breakdown = TargetService.compute_scope_breakdown(target)
@@ -436,7 +530,7 @@ class TestBreakdownTree:
         self._submit(q2, indicator, 40)
 
         target = TargetFactory(
-            scope_unit=None, indicator=indicator,
+            scope_unit=None, indicators=[indicator],
             year=2026, target_value=200,
         )
         tree = TargetService.compute_scope_breakdown_tree(target)
@@ -461,7 +555,7 @@ class TestBreakdownTree:
         self._submit(qism, indicator, 50)
 
         target = TargetFactory(
-            scope_unit=None, indicator=indicator,
+            scope_unit=None, indicators=[indicator],
             year=2026, target_value=100,
         )
         tree = TargetService.compute_scope_breakdown_tree(target)
@@ -497,7 +591,7 @@ class TestBreakdownTree:
         self._submit(q2, indicator, 40)
 
         target = TargetFactory(
-            scope_unit=daira, indicator=indicator,
+            scope_unit=daira, indicators=[indicator],
             year=2026, target_value=100,
         )
         tree = TargetService.compute_scope_breakdown_tree(target)
@@ -522,7 +616,7 @@ class TestBreakdownTree:
         self._submit(q2, indicator, 35)
 
         target = TargetFactory(
-            scope_unit=None, indicator=indicator,
+            scope_unit=None, indicators=[indicator],
             year=2026, target_value=200,
         )
         tree = TargetService.compute_scope_breakdown_tree(target)
@@ -537,6 +631,8 @@ class TestBreakdownTree:
         indicator = IndicatorFactory(
             unit_type="number", accumulation_type="sum"
         )
-        target = TargetFactory(scope_unit=qism, indicator=indicator, year=2026)
+        target = TargetFactory(
+            scope_unit=qism, indicators=[indicator], year=2026,
+        )
         tree = TargetService.compute_scope_breakdown_tree(target)
         assert tree == []

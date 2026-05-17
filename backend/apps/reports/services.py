@@ -469,8 +469,7 @@ class ReportService:
 
         targets = Target.objects.filter(year=year).select_related(
             'scope_unit', 'scope_unit__parent',
-            'indicator',
-        ).order_by('scope_unit__name', 'indicator__name')
+        ).prefetch_related('indicators').order_by('scope_unit__name', 'name')
 
         # تصفية حسب الدور (نفس منطق TargetViewSet.get_queryset للاتساق)
         if user.role == 'statistics_admin':
@@ -516,7 +515,10 @@ class ReportService:
             )
             progress_list.append({
                 'target_id': target.id,
-                'indicator_name': target.indicator.name,
+                'target_name': target.name,
+                # المستهدف مركّب — قد يحوي عدّة مؤشّرات. للتوافق نعرض اسم
+                # المستهدف بدلاً من اسم مؤشّر واحد.
+                'indicator_name': target.name,
                 # للتوافق مع الفرونت القديم نُبقي على مفتاح qism_name
                 'qism_name': scope_name,
                 'scope_unit_name': scope_name,

@@ -1,9 +1,16 @@
 """
-نموذج المستهدفات — يدعم المستهدفات الهرمية على مستويات مختلفة:
-- مؤسسي (scope_unit=None): مستهدف للمؤسسة ككل
-- دائرة: مستهدف لدائرة معيّنة (يُجمّع من أقسامها)
-- مديرية: مستهدف لمديرية معيّنة (يُجمّع من أقسامها)
-- قسم: مستهدف لقسم واحد محدّد
+نموذج المستهدفات — يدعم المستهدفات المركّبة الهرميّة على مستويات مختلفة:
+
+نموذج المستهدف:
+- اسم وصفي (مثل «إعداد التقارير»)
+- مجموعة مؤشّرات تُكوّن المستهدف (M2M، مكوّن واحد أو أكثر)
+- قيمة مستهدفة (الإجمالي عبر كل المكوّنات بالجمع البسيط)
+- نطاق هرمي: مؤسسي / دائرة / مديرية / قسم
+
+قواعد جوهريّة:
+- كل المكوّنات يجب أن تكون بنفس `unit_type` (منع صارم للخلط).
+- المؤشرات النصّيّة لا تُقبَل (لا معنى لـ «مستهدف نصّ»).
+- مؤشّر «آخر قيمة» يُقبَل فقط على مستوى القسم.
 """
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -12,19 +19,26 @@ from django.db import models
 
 class Target(models.Model):
     """
-    المستهدفات السنوية الهرمية.
+    المستهدفات السنوية المركّبة الهرميّة.
 
     scope_unit يُحدّد مستوى المستهدف:
     - None: المؤسسة كلها
     - daira: دائرة
     - mudiriya: مديرية
-    - qism: قسم منفرد (للحالات الخاصة)
+    - qism: قسم منفرد
 
-    القاعدة الذهبية: المؤشرات من نوع "آخر قيمة" (last_value) تُسمح فقط على
-    مستوى القسم، لأن "آخر قيمة" ليس لها تجميع هرمي واضح.
+    `indicators` (M2M) يحوي مكوّن واحد على الأقلّ. عند حسّاب القيمة الفعليّة،
+    نجمع قيم كل المكوّنات (جمع بسيط، بدون أوزان).
     """
 
-    # السماح بـ null للدلالة على مستهدف على مستوى المؤسسة كاملة
+    name = models.CharField(
+        max_length=200,
+        verbose_name='اسم المستهدف',
+        help_text=(
+            'وصف مختصر للمستهدف (مثل «إعداد التقارير»). يُعرض في التقارير '
+            'كعنوان رئيسي مع تفصيل المكوّنات تحته.'
+        ),
+    )
     scope_unit = models.ForeignKey(
         'organization.OrganizationUnit',
         on_delete=models.CASCADE,
@@ -37,9 +51,17 @@ class Target(models.Model):
             'اترك فارغاً لإنشاء مستهدف على مستوى المؤسسة كاملة.'
         ),
     )
-    indicator = models.ForeignKey(
-        'indicators.Indicator', on_delete=models.CASCADE,
-        related_name='targets', verbose_name='المؤشر'
+    # M2M بدل FK واحد — مستهدف واحد يمكن أن يتركّب من عدّة مؤشّرات.
+    # كلها يجب أن تكون بنفس unit_type (يُفحَص في الـ service لأن M2M لا يصحّ
+    # التحقّق منه في model.clean قبل الحفظ).
+    indicators = models.ManyToManyField(
+        'indicators.Indicator',
+        related_name='targets',
+        verbose_name='المؤشّرات المُكوِّنة',
+        help_text=(
+            'المؤشّر/المؤشّرات التي يتركّب منها المستهدف. كل المكوّنات '
+            'يجب أن تكون بنفس نوع الوحدة (عدد، نسبة، إلخ).'
+        ),
     )
     year = models.PositiveIntegerField(verbose_name='السنة')
     target_value = models.FloatField(verbose_name='القيمة المستهدفة')
@@ -56,19 +78,17 @@ class Target(models.Model):
         db_table = 'targets'
         verbose_name = 'مستهدف'
         verbose_name_plural = 'المستهدفات'
-        # قيد فريد: لا يمكن وجود مستهدفين بنفس النطاق والمؤشر والسنة
-        # PostgreSQL يعامل NULL كقيم مختلفة (null != null)،
-        # لذا قد يُسمح بتكرار مستهدفات على مستوى المؤسسة — نعالج ذلك يدوياً في clean()
-        unique_together = ('scope_unit', 'indicator', 'year')
+        # ملاحظة: لم نُعد قيد unique_together على (scope_unit, indicator, year)
+        # لأن indicator أصبح M2M. التفرّد الآن على مستوى الاسم داخل نفس النطاق
+        # والسنة (نُفحَص في الـ service).
         indexes = [
-            models.Index(fields=['scope_unit', 'indicator', 'year'], name='idx_target_scope_ind_year'),
+            models.Index(fields=['scope_unit', 'year'], name='idx_target_scope_year'),
             models.Index(fields=['year'], name='idx_target_year'),
-            models.Index(fields=['indicator', 'year'], name='idx_target_indicator_year'),
         ]
 
     def __str__(self):
         scope_label = self.scope_unit.name if self.scope_unit_id else 'المؤسسة كاملة'
-        return f'{scope_label} - {self.indicator.name} ({self.year})'
+        return f'{scope_label} - {self.name} ({self.year})'
 
     @property
     def scope_level(self):
@@ -77,46 +97,20 @@ class Target(models.Model):
             return 'institution'
         return self.scope_unit.unit_type
 
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
     def clean(self):
         super().clean()
 
-        # 1) قيمة المستهدف يجب أن تكون موجبة
+        # 1) الاسم مطلوب وغير فارغ
+        if not (self.name or '').strip():
+            raise ValidationError({'name': 'اسم المستهدف مطلوب'})
+
+        # 2) قيمة المستهدف يجب أن تكون موجبة
         if self.target_value is not None and self.target_value <= 0:
             raise ValidationError({
                 'target_value': 'القيمة المستهدفة يجب أن تكون أكبر من صفر'
             })
 
-        # 2) فحص المؤشر
-        if self.indicator_id:
-            try:
-                indicator = self.indicator
-            except ObjectDoesNotExist:
-                indicator = None
-
-            if indicator:
-                # المؤشرات النصية لا يمكن أن يكون لها مستهدف
-                if indicator.unit_type == 'text':
-                    raise ValidationError({
-                        'indicator': 'لا يمكن تحديد مستهدف لمؤشر نصي'
-                    })
-
-                # المؤشرات من نوع "آخر قيمة" يُسمح بها فقط على مستوى القسم
-                if indicator.accumulation_type == 'last_value':
-                    scope_level = self.scope_level
-                    if scope_level != 'qism':
-                        raise ValidationError({
-                            'indicator': (
-                                'المؤشرات من نوع "آخر قيمة" تُسمح لها مستهدفات '
-                                'على مستوى القسم فقط (وليس الدائرة أو المديرية أو المؤسسة)، '
-                                'لأن "آخر قيمة" ليس لها معنى تجميع هرمي.'
-                            )
-                        })
-
-        # 3) النطاق يجب أن يكون من الأنواع المسموحة
+        # 3) فحص النطاق
         if self.scope_unit_id:
             try:
                 scope = self.scope_unit
@@ -131,7 +125,6 @@ class Target(models.Model):
                         )
                     })
                 # القسم يجب أن يكون مُسنَداً للتقديم (له SupervisedUnit)
-                # — أقسام التخطيط (PlanningAssignment) لا تأخذ مستهدفات
                 if scope.unit_type == 'qism':
                     is_planning = hasattr(scope, 'planning_assignment')
                     has_supervisor = hasattr(scope, 'supervisor_link')
@@ -142,16 +135,63 @@ class Target(models.Model):
                             )
                         })
 
-        # 4) منع التكرار على مستوى المؤسسة (null scope) — PostgreSQL لا يفرض ذلك
-        if self.scope_unit_id is None and self.indicator_id and self.year:
-            duplicate = Target.objects.filter(
-                scope_unit__isnull=True,
-                indicator_id=self.indicator_id,
-                year=self.year,
-            )
-            if self.pk:
-                duplicate = duplicate.exclude(pk=self.pk)
-            if duplicate.exists():
-                raise ValidationError(
-                    'يوجد مسبقاً مستهدف على مستوى المؤسسة لهذا المؤشر في هذه السنة'
+    def validate_components(self, indicators):
+        """
+        يُفحَص بعد ربط المؤشّرات (M2M لا يَصحّ في clean قبل الحفظ).
+
+        - مكوّن واحد على الأقلّ
+        - كل المكوّنات بنفس unit_type
+        - لا مكوّن نصّي (text)
+        - مكوّن «آخر قيمة» مسموح فقط على مستوى القسم
+        - منع تكرار الاسم في نفس النطاق والسنة
+        """
+        if not indicators:
+            raise ValidationError({
+                'indicators': 'يجب اختيار مؤشّر واحد على الأقلّ كمكوّن للمستهدف'
+            })
+
+        unit_types = {ind.unit_type for ind in indicators}
+        if len(unit_types) > 1:
+            raise ValidationError({
+                'indicators': (
+                    'كل المكوّنات يجب أن تكون بنفس نوع الوحدة. '
+                    f'الأنواع المُختارة: {", ".join(sorted(unit_types))}'
                 )
+            })
+
+        unit_type = unit_types.pop()
+        if unit_type == 'text':
+            raise ValidationError({
+                'indicators': 'لا يمكن إنشاء مستهدف لمؤشّرات نصّيّة'
+            })
+
+        # «آخر قيمة» مسموح فقط على مستوى القسم
+        has_last_value = any(
+            ind.accumulation_type == 'last_value' for ind in indicators
+        )
+        if has_last_value and self.scope_level != 'qism':
+            raise ValidationError({
+                'indicators': (
+                    'المؤشرات من نوع "آخر قيمة" تُسمح لها مستهدفات على مستوى '
+                    'القسم فقط (وليس الدائرة أو المديرية أو المؤسسة).'
+                )
+            })
+
+        # منع تكرار الاسم في نفس النطاق والسنة
+        duplicate_qs = Target.objects.filter(
+            scope_unit_id=self.scope_unit_id,
+            year=self.year,
+            name=self.name,
+        )
+        if self.pk:
+            duplicate_qs = duplicate_qs.exclude(pk=self.pk)
+        if duplicate_qs.exists():
+            scope_label = (
+                self.scope_unit.name if self.scope_unit_id else 'المؤسسة'
+            )
+            raise ValidationError({
+                'name': (
+                    f'يوجد مستهدف بنفس الاسم «{self.name}» في {scope_label} '
+                    f'للسنة {self.year}'
+                )
+            })

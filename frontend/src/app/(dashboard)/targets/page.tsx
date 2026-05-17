@@ -8,6 +8,7 @@ import {
   updateTarget,
   deleteTarget,
   getTargetBreakdown,
+  type TargetInput,
 } from "@/lib/api/targets";
 import { getOrganizationUnits } from "@/lib/api/organization";
 import {
@@ -50,13 +51,15 @@ import {
   Eye,
   ChevronDown,
   ChevronLeft,
+  Layers3,
 } from "lucide-react";
 import { getErrorMessage } from "@/lib/utils";
 
 interface TargetFormData {
+  name: string;
   scope_level: TargetScopeLevel;
   scope_unit: number | null;
-  indicator: number | null;
+  indicator_ids: number[];
   year: number;
   target_value: number;
   notes: string;
@@ -65,9 +68,10 @@ interface TargetFormData {
 const currentYear = new Date().getFullYear();
 
 const initialFormData: TargetFormData = {
+  name: "",
   scope_level: "institution",
   scope_unit: null,
-  indicator: null,
+  indicator_ids: [],
   year: currentYear,
   target_value: 0,
   notes: "",
@@ -106,6 +110,20 @@ const UNIT_TYPE_STYLES: Record<
   mudiriya: { icon: Layers, color: "text-emerald-700", label: "مديرية" },
   qism: { icon: TargetIcon, color: "text-amber-700", label: "قسم" },
 };
+
+// تسميات نوع الوحدة بالعربية
+const UNIT_TYPE_LABELS: Record<string, string> = {
+  number: "عدد",
+  percentage: "نسبة مئوية",
+  text: "نصّ",
+  hours: "ساعات",
+  days: "أيام",
+};
+
+// تحويل رقم عربي
+function arNum(n: number): string {
+  return n.toLocaleString("ar-IQ");
+}
 
 // ═══ مكوّن الشجرة الهرمية لتفصيل المستهدف ═══
 interface TreeNodeProps {
@@ -168,7 +186,7 @@ function BreakdownTreeNode({ node, level }: TreeNodeProps) {
               {isZero ? (
                 <span className="text-red-500">—</span>
               ) : (
-                node.contribution_value.toLocaleString("ar-IQ")
+                arNum(node.contribution_value)
               )}
             </div>
             <div className="text-gray-500" dir="ltr">
@@ -231,13 +249,19 @@ export default function TargetsPage() {
   const [breakdownTargetId, setBreakdownTargetId] = useState<number | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
 
+  // الصفّ المُوسَّع في الجدول لعرض تفصيل المكوّنات
+  const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
+
+  // محاولة الإرسال (لتفعيل عرض رسائل التحقّق)
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
   // ── الاستعلامات ──
   const queryParams: Record<string, string> = {
     with_progress: "true", // دائماً نطلب التقدم للجدول
   };
   if (yearFilter) queryParams.year = yearFilter;
   if (scopeLevelFilter) queryParams.scope_level = scopeLevelFilter;
-  if (categoryFilter) queryParams.indicator__category = categoryFilter;
+  if (categoryFilter) queryParams.indicators__category = categoryFilter;
 
   const {
     data: targetsData,
@@ -298,7 +322,7 @@ export default function TargetsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Target> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<TargetInput> }) =>
       updateTarget(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["targets"] });
@@ -349,12 +373,22 @@ export default function TargetsPage() {
     return targets.filter(
       (t: Target) =>
         (t.scope_unit_name || "").toLowerCase().includes(q) ||
-        t.indicator_name.toLowerCase().includes(q) ||
+        (t.name || "").toLowerCase().includes(q) ||
+        t.indicators.some((ind) => ind.name.toLowerCase().includes(q)) ||
         (t.notes || "").toLowerCase().includes(q)
     );
   }, [targets, searchQuery]);
 
+  // نوع الوحدة المُقفَل (مأخوذ من أول مؤشّر مختار)
+  const lockedUnitType: string | null = useMemo(() => {
+    if (formData.indicator_ids.length === 0) return null;
+    const firstId = formData.indicator_ids[0];
+    const first = indicators.find((i: Indicator) => i.id === firstId);
+    return first?.unit_type || null;
+  }, [formData.indicator_ids, indicators]);
+
   // المؤشرات المتاحة في الـ form (تستبعد النصية والـ last_value إذا النطاق غير قسم)
+  // + قفل نوع الوحدة بنوع المؤشّر الأوّل المختار
   const availableIndicators = useMemo(() => {
     return indicators.filter((ind: Indicator) => {
       if (ind.unit_type === "text") return false;
@@ -364,27 +398,32 @@ export default function TargetsPage() {
       ) {
         return false;
       }
+      // قفل نوع الوحدة: إذا تمّ اختيار مؤشّر، أظهر فقط ما يطابق نوعه
+      if (lockedUnitType && ind.unit_type !== lockedUnitType) return false;
       return true;
     });
-  }, [indicators, formData.scope_level]);
+  }, [indicators, formData.scope_level, lockedUnitType]);
 
   // ── دوال الحوار ──
   const openAddDialog = () => {
     setFormData(initialFormData);
     setEditingId(null);
+    setSubmitAttempted(false);
     setDialogOpen(true);
   };
 
   const openEditDialog = (target: Target) => {
     setFormData({
+      name: target.name || "",
       scope_level: target.scope_level,
       scope_unit: target.scope_unit,
-      indicator: target.indicator,
+      indicator_ids: target.indicators.map((i) => i.id),
       year: target.year,
       target_value: target.target_value,
       notes: target.notes || "",
     });
     setEditingId(target.id);
+    setSubmitAttempted(false);
     setDialogOpen(true);
   };
 
@@ -392,37 +431,88 @@ export default function TargetsPage() {
     setDialogOpen(false);
     setFormData(initialFormData);
     setEditingId(null);
+    setSubmitAttempted(false);
     createMutation.reset();
     updateMutation.reset();
   };
 
   const handleScopeLevelChange = (newLevel: TargetScopeLevel) => {
-    setFormData((prev) => ({
-      ...prev,
-      scope_level: newLevel,
-      // مسح الـ scope_unit لأن القائمة ستتغيّر
-      scope_unit: newLevel === "institution" ? null : null,
-      // لو المؤشر الحالي last_value والمستوى أعلى من قسم، امسح الاختيار
-      indicator: prev.indicator,
-    }));
+    setFormData((prev) => {
+      // إذا غيّر إلى مستوى غير قسم، أزل المؤشّرات من نوع last_value
+      let newIds = prev.indicator_ids;
+      if (newLevel !== "qism") {
+        newIds = prev.indicator_ids.filter((id) => {
+          const ind = indicators.find((i: Indicator) => i.id === id);
+          return ind && ind.accumulation_type !== "last_value";
+        });
+      }
+      return {
+        ...prev,
+        scope_level: newLevel,
+        scope_unit: null,
+        indicator_ids: newIds,
+      };
+    });
   };
 
-  const handleSubmit = () => {
-    if (!formData.indicator) return;
-    if (formData.scope_level !== "institution" && !formData.scope_unit) return;
-    if (formData.target_value <= 0) return;
+  const toggleIndicator = (indicatorId: number) => {
+    setFormData((prev) => {
+      const isSelected = prev.indicator_ids.includes(indicatorId);
+      if (isSelected) {
+        return {
+          ...prev,
+          indicator_ids: prev.indicator_ids.filter((id) => id !== indicatorId),
+        };
+      }
+      // التحقّق من تطابق نوع الوحدة قبل الإضافة
+      const target = indicators.find((i: Indicator) => i.id === indicatorId);
+      if (!target) return prev;
+      if (lockedUnitType && target.unit_type !== lockedUnitType) {
+        return prev; // الواجهة تخفي هذه المؤشّرات أصلاً
+      }
+      return {
+        ...prev,
+        indicator_ids: [...prev.indicator_ids, indicatorId],
+      };
+    });
+  };
 
-    const payload = {
+  // ── التحقّق ──
+  const nameError = !formData.name.trim() ? "اسم المستهدف مطلوب" : null;
+  const indicatorsError =
+    formData.indicator_ids.length === 0
+      ? "اختر مؤشّراً واحداً على الأقلّ"
+      : null;
+  const scopeError =
+    formData.scope_level !== "institution" && !formData.scope_unit
+      ? "اختر النطاق"
+      : null;
+  const valueError =
+    formData.target_value <= 0 ? "القيمة المستهدفة يجب أن تكون أكبر من صفر" : null;
+
+  const hasValidationErrors = !!(
+    nameError ||
+    indicatorsError ||
+    scopeError ||
+    valueError
+  );
+
+  const handleSubmit = () => {
+    setSubmitAttempted(true);
+    if (hasValidationErrors) return;
+
+    const payload: TargetInput = {
+      name: formData.name.trim(),
       scope_unit:
         formData.scope_level === "institution" ? null : formData.scope_unit,
-      indicator: formData.indicator,
+      indicator_ids: formData.indicator_ids,
       year: formData.year,
       target_value: formData.target_value,
       notes: formData.notes || undefined,
     };
 
     if (editingId) {
-      updateMutation.mutate({ id: editingId, data: payload as Partial<Target> });
+      updateMutation.mutate({ id: editingId, data: payload });
     } else {
       createMutation.mutate(payload);
     }
@@ -493,7 +583,7 @@ export default function TargetsPage() {
           <div className="relative lg:col-span-2">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
-              placeholder="بحث باسم النطاق أو المؤشر أو الملاحظات..."
+              placeholder="بحث باسم المستهدف أو النطاق أو المؤشر..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pr-10"
@@ -557,10 +647,10 @@ export default function TargetsPage() {
                     النطاق
                   </th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">
-                    المؤشر
+                    اسم المستهدف
                   </th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">
-                    التصنيف
+                    نوع الوحدة
                   </th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">
                     السنة
@@ -581,129 +671,206 @@ export default function TargetsPage() {
                   const Icon = SCOPE_LEVEL_ICONS[target.scope_level];
                   const colorClass = SCOPE_LEVEL_COLORS[target.scope_level];
                   const canShowBreakdown = target.scope_level !== "qism";
+                  const componentCount = target.indicators.length;
+                  const isComposite = componentCount > 1;
+                  const isExpanded = expandedRowId === target.id;
+                  const hasComponents =
+                    target.progress &&
+                    target.progress.components &&
+                    target.progress.components.length > 0;
 
                   return (
-                    <tr
-                      key={target.id}
-                      className="hover:bg-gray-50 transition"
-                    >
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border ${colorClass}`}
-                        >
-                          <Icon className="w-3 h-3" />
-                          {SCOPE_LEVEL_LABELS[target.scope_level]}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-medium text-gray-900">
-                        {target.scope_unit_name || "المؤسسة كاملة"}
-                      </td>
-                      <td className="py-3 px-4 text-gray-700">
-                        {target.indicator_name}
-                      </td>
-                      <td className="py-3 px-4">
-                        {target.indicator_category_name ? (
-                          <span className="inline-block px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                            {target.indicator_category_name}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-gray-600" dir="ltr">
-                        {target.year}
-                      </td>
-                      <td
-                        className="py-3 px-4 font-semibold text-gray-900"
-                        dir="ltr"
+                    <>
+                      <tr
+                        key={target.id}
+                        className="hover:bg-gray-50 transition"
                       >
-                        {target.target_value.toLocaleString("ar-IQ")}
-                      </td>
-                      <td className="py-3 px-4">
-                        {target.progress ? (
-                          <div className="space-y-1 min-w-[160px]">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-600" dir="ltr">
-                                {target.progress.cumulative_value.toLocaleString(
-                                  "ar-IQ"
-                                )}
-                                {" / "}
-                                {target.progress.target_value.toLocaleString(
-                                  "ar-IQ"
-                                )}
-                              </span>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border ${colorClass}`}
+                          >
+                            <Icon className="w-3 h-3" />
+                            {SCOPE_LEVEL_LABELS[target.scope_level]}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-gray-900">
+                          {target.scope_unit_name || "المؤسسة كاملة"}
+                        </td>
+                        <td className="py-3 px-4 text-gray-800">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">{target.name}</span>
+                            {isComposite && (
                               <span
-                                className={`font-bold ${
-                                  target.progress.progress_percentage >= 100
-                                    ? "text-green-600"
-                                    : target.progress.progress_percentage >= 75
-                                    ? "text-blue-600"
-                                    : target.progress.progress_percentage >= 50
-                                    ? "text-amber-600"
-                                    : "text-red-600"
-                                }`}
-                                dir="ltr"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                title={target.indicators
+                                  .map((i) => i.name)
+                                  .join("، ")}
                               >
-                                {target.progress.progress_percentage}%
+                                <Layers3 className="w-3 h-3" />
+                                {arNum(componentCount)} مكوّنات
                               </span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                              <div
-                                className={`h-2 rounded-full transition-all ${
-                                  target.progress.progress_percentage >= 100
-                                    ? "bg-green-500"
-                                    : target.progress.progress_percentage >= 75
-                                    ? "bg-blue-500"
-                                    : target.progress.progress_percentage >= 50
-                                    ? "bg-amber-500"
-                                    : "bg-red-500"
-                                }`}
-                                style={{
-                                  width: `${Math.min(
-                                    target.progress.progress_percentage,
-                                    100
-                                  )}%`,
-                                }}
-                              />
-                            </div>
+                            )}
                           </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {canShowBreakdown && (
+                          {/* قائمة موجزة لأسماء المكوّنات */}
+                          <div className="text-xs text-gray-500 mt-1 line-clamp-1">
+                            {target.indicators.map((i) => i.name).join(" • ")}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          {target.unit_type ? (
+                            <span className="inline-block px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                              {UNIT_TYPE_LABELS[target.unit_type] || target.unit_type}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600" dir="ltr">
+                          {target.year}
+                        </td>
+                        <td
+                          className="py-3 px-4 font-semibold text-gray-900"
+                          dir="ltr"
+                        >
+                          {arNum(target.target_value)}
+                        </td>
+                        <td className="py-3 px-4">
+                          {target.progress ? (
+                            <div className="space-y-1 min-w-[160px]">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-gray-600" dir="ltr">
+                                  {arNum(target.progress.cumulative_value)}
+                                  {" / "}
+                                  {arNum(target.progress.target_value)}
+                                </span>
+                                <span
+                                  className={`font-bold ${
+                                    target.progress.progress_percentage >= 100
+                                      ? "text-green-600"
+                                      : target.progress.progress_percentage >= 75
+                                      ? "text-blue-600"
+                                      : target.progress.progress_percentage >= 50
+                                      ? "text-amber-600"
+                                      : "text-red-600"
+                                  }`}
+                                  dir="ltr"
+                                >
+                                  {target.progress.progress_percentage}%
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full transition-all ${
+                                    target.progress.progress_percentage >= 100
+                                      ? "bg-green-500"
+                                      : target.progress.progress_percentage >= 75
+                                      ? "bg-blue-500"
+                                      : target.progress.progress_percentage >= 50
+                                      ? "bg-amber-500"
+                                      : "bg-red-500"
+                                  }`}
+                                  style={{
+                                    width: `${Math.min(
+                                      target.progress.progress_percentage,
+                                      100
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                              {hasComponents && isComposite && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedRowId(isExpanded ? null : target.id)
+                                  }
+                                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 mt-1"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="w-3 h-3" />
+                                  ) : (
+                                    <ChevronLeft className="w-3 h-3" />
+                                  )}
+                                  تفصيل المكوّنات
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {canShowBreakdown && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-blue-600 hover:text-blue-700"
+                                onClick={() => openBreakdown(target.id)}
+                              >
+                                <Eye className="w-4 h-4 ml-1" />
+                                التفصيل
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-blue-600 hover:text-blue-700"
-                              onClick={() => openBreakdown(target.id)}
+                              onClick={() => openEditDialog(target)}
                             >
-                              <Eye className="w-4 h-4 ml-1" />
-                              التفصيل
+                              <Pencil className="w-4 h-4 ml-1" />
+                              تعديل
                             </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(target)}
-                          >
-                            <Pencil className="w-4 h-4 ml-1" />
-                            تعديل
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700"
-                            onClick={() => handleDeleteClick(target.id)}
-                          >
-                            <Trash2 className="w-4 h-4 ml-1" />
-                            حذف
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => handleDeleteClick(target.id)}
+                            >
+                              <Trash2 className="w-4 h-4 ml-1" />
+                              حذف
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && hasComponents && (
+                        <tr
+                          key={`${target.id}-components`}
+                          className="bg-indigo-50/40"
+                        >
+                          <td colSpan={8} className="py-3 px-6">
+                            <div className="space-y-2">
+                              <div className="text-xs font-semibold text-indigo-800 flex items-center gap-1">
+                                <Layers3 className="w-3 h-3" />
+                                تفصيل قيم المكوّنات
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {target.progress!.components.map((c) => (
+                                  <div
+                                    key={c.indicator_id}
+                                    className="bg-white border border-indigo-100 rounded-md p-2 flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-medium text-gray-800 truncate">
+                                        {c.indicator_name}
+                                      </div>
+                                      <div className="text-[10px] text-gray-500">
+                                        {UNIT_TYPE_LABELS[c.unit_type] ||
+                                          c.unit_type}
+                                      </div>
+                                    </div>
+                                    <div
+                                      className="text-sm font-bold text-indigo-700"
+                                      dir="ltr"
+                                    >
+                                      {arNum(c.value)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
@@ -717,13 +884,14 @@ export default function TargetsPage() {
         open={dialogOpen}
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}
       >
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? "تعديل المستهدف" : "إضافة مستهدف جديد"}
             </DialogTitle>
             <DialogDescription>
-              اختر المستوى (مؤسسة / دائرة / مديرية / قسم) ثم المؤشر وقيمة المستهدف
+              أدخِل اسم المستهدف، اختر المستوى والنطاق ثم المؤشّرات المُكوِّنة وقيمة
+              المستهدف
             </DialogDescription>
           </DialogHeader>
 
@@ -739,6 +907,28 @@ export default function TargetsPage() {
           )}
 
           <div className="space-y-4 py-4">
+            {/* اسم المستهدف */}
+            <div className="space-y-2">
+              <Label htmlFor="target-name">
+                اسم المستهدف <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="target-name"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder="مثال: مستهدف الإنجاز السنوي للتدريب"
+                dir="rtl"
+                className={
+                  submitAttempted && nameError ? "border-red-500" : ""
+                }
+              />
+              {submitAttempted && nameError && (
+                <p className="text-xs text-red-600">{nameError}</p>
+              )}
+            </div>
+
             {/* اختيار المستوى */}
             <div className="space-y-2">
               <Label>مستوى المستهدف</Label>
@@ -771,7 +961,8 @@ export default function TargetsPage() {
             {formData.scope_level !== "institution" && (
               <div className="space-y-2">
                 <Label htmlFor="target-scope-unit">
-                  اختر {SCOPE_LEVEL_LABELS[formData.scope_level]}
+                  اختر {SCOPE_LEVEL_LABELS[formData.scope_level]}{" "}
+                  <span className="text-red-500">*</span>
                 </Label>
                 <select
                   id="target-scope-unit"
@@ -784,7 +975,11 @@ export default function TargetsPage() {
                         : null,
                     }))
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
+                  className={`flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm text-right ${
+                    submitAttempted && scopeError
+                      ? "border-red-500"
+                      : "border-input"
+                  }`}
                   dir="rtl"
                 >
                   <option value="">
@@ -798,43 +993,109 @@ export default function TargetsPage() {
                     )
                   )}
                 </select>
+                {submitAttempted && scopeError && (
+                  <p className="text-xs text-red-600">{scopeError}</p>
+                )}
               </div>
             )}
 
-            {/* المؤشر */}
+            {/* المؤشّرات المُكوِّنة (متعدّد الاختيار) */}
             <div className="space-y-2">
-              <Label htmlFor="target-indicator">المؤشر</Label>
-              <select
-                id="target-indicator"
-                value={formData.indicator?.toString() || ""}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    indicator: e.target.value
-                      ? parseInt(e.target.value)
-                      : null,
-                  }))
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-right"
-                dir="rtl"
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <Label>
+                  مؤشّرات المكوّنات <span className="text-red-500">*</span>
+                </Label>
+                <span className="text-xs text-gray-500">
+                  {arNum(formData.indicator_ids.length)} محدّد
+                </span>
+              </div>
+              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-md px-3 py-2 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span>
+                  كلّ المكوّنات يجب أن تكون بنفس نوع الوحدة. عند اختيار أوّل
+                  مؤشّر، تُقفَل القائمة على نوع وحدته.
+                </span>
+              </p>
+
+              {lockedUnitType && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-600">نوع الوحدة المقفل:</span>
+                  <span className="inline-block px-2 py-0.5 rounded-md font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {UNIT_TYPE_LABELS[lockedUnitType] || lockedUnitType}
+                  </span>
+                  {formData.indicator_ids.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData((prev) => ({ ...prev, indicator_ids: [] }))
+                      }
+                      className="text-red-600 hover:text-red-700 underline"
+                    >
+                      مسح الاختيارات
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div
+                className={`max-h-[220px] overflow-y-auto rounded-md border bg-white divide-y divide-gray-100 ${
+                  submitAttempted && indicatorsError
+                    ? "border-red-500"
+                    : "border-gray-200"
+                }`}
               >
-                <option value="">اختر المؤشر</option>
-                {availableIndicators.map((ind: Indicator) => {
-                  const cat = categories.find(
-                    (c: IndicatorCategory) => c.id === ind.category
-                  );
-                  return (
-                    <option key={ind.id} value={ind.id.toString()}>
-                      {ind.name}
-                      {cat ? ` — ${cat.name}` : ""}
-                    </option>
-                  );
-                })}
-              </select>
+                {availableIndicators.length === 0 ? (
+                  <div className="p-3 text-xs text-gray-500 text-center">
+                    لا توجد مؤشّرات متاحة على هذا المستوى.
+                  </div>
+                ) : (
+                  availableIndicators.map((ind: Indicator) => {
+                    const checked = formData.indicator_ids.includes(ind.id);
+                    const cat = categories.find(
+                      (c: IndicatorCategory) => c.id === ind.category
+                    );
+                    return (
+                      <label
+                        key={ind.id}
+                        className={`flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50 transition ${
+                          checked ? "bg-primary-50/40" : ""
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleIndicator(ind.id)}
+                          className="mt-1 w-4 h-4 accent-primary-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-gray-900 truncate">
+                            {ind.name}
+                          </div>
+                          <div className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+                            <span>
+                              {UNIT_TYPE_LABELS[ind.unit_type] || ind.unit_type}
+                            </span>
+                            {cat && (
+                              <>
+                                <span>•</span>
+                                <span>{cat.name}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+
+              {submitAttempted && indicatorsError && (
+                <p className="text-xs text-red-600">{indicatorsError}</p>
+              )}
               {formData.scope_level !== "qism" && (
                 <p className="text-xs text-gray-500">
-                  💡 المؤشرات من نوع "آخر قيمة" و"النصّية" مخفيّة لأنها غير
-                  مسموحة على هذا المستوى.
+                  💡 المؤشرات من نوع &quot;آخر قيمة&quot; و&quot;النصّية&quot;
+                  مخفيّة لأنها غير مسموحة على هذا المستوى.
                 </p>
               )}
             </div>
@@ -856,7 +1117,9 @@ export default function TargetsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="target-value">القيمة المستهدفة</Label>
+                <Label htmlFor="target-value">
+                  القيمة المستهدفة <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="target-value"
                   type="number"
@@ -868,7 +1131,13 @@ export default function TargetsPage() {
                     }))
                   }
                   dir="ltr"
+                  className={
+                    submitAttempted && valueError ? "border-red-500" : ""
+                  }
                 />
+                {submitAttempted && valueError && (
+                  <p className="text-xs text-red-600">{valueError}</p>
+                )}
               </div>
             </div>
 
@@ -890,12 +1159,7 @@ export default function TargetsPage() {
           <DialogFooter>
             <Button
               onClick={handleSubmit}
-              disabled={
-                isMutating ||
-                !formData.indicator ||
-                formData.target_value <= 0 ||
-                (formData.scope_level !== "institution" && !formData.scope_unit)
-              }
+              disabled={isMutating}
             >
               {isMutating
                 ? "جارٍ الحفظ..."
@@ -930,7 +1194,7 @@ export default function TargetsPage() {
           if (!open) setBreakdownTargetId(null);
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-primary-600" />
@@ -938,7 +1202,7 @@ export default function TargetsPage() {
             </DialogTitle>
             <DialogDescription>
               {breakdownData
-                ? `${breakdownData.indicator_name} — ${breakdownData.scope_unit_name} — ${breakdownData.year}`
+                ? `${breakdownData.target_name} — ${breakdownData.scope_unit_name} — ${breakdownData.year}`
                 : "تحميل..."}
             </DialogDescription>
           </DialogHeader>
@@ -955,7 +1219,7 @@ export default function TargetsPage() {
                     className="text-xl font-bold text-blue-900"
                     dir="ltr"
                   >
-                    {breakdownData.target_value.toLocaleString("ar-IQ")}
+                    {arNum(breakdownData.target_value)}
                   </div>
                 </div>
                 <div className="p-3 bg-green-50 rounded-lg border border-green-100">
@@ -964,7 +1228,7 @@ export default function TargetsPage() {
                     className="text-xl font-bold text-green-900"
                     dir="ltr"
                   >
-                    {breakdownData.cumulative_value.toLocaleString("ar-IQ")}
+                    {arNum(breakdownData.cumulative_value)}
                   </div>
                 </div>
                 <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
@@ -994,8 +1258,8 @@ export default function TargetsPage() {
                 <div className="flex justify-between text-xs text-gray-600">
                   <span>التقدّم الإجمالي</span>
                   <span dir="ltr">
-                    {breakdownData.cumulative_value} /{" "}
-                    {breakdownData.target_value}
+                    {arNum(breakdownData.cumulative_value)} /{" "}
+                    {arNum(breakdownData.target_value)}
                   </span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
@@ -1018,6 +1282,63 @@ export default function TargetsPage() {
                   />
                 </div>
               </div>
+
+              {/* تفصيل المكوّنات */}
+              {breakdownData.components && breakdownData.components.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-indigo-800">
+                    <Layers3 className="w-4 h-4" />
+                    تفصيل المكوّنات
+                    <span className="text-xs font-normal text-gray-500">
+                      ({arNum(breakdownData.components.length)} مكوّن)
+                    </span>
+                  </div>
+                  <div className="bg-indigo-50/40 border border-indigo-100 rounded-lg p-3 space-y-2">
+                    {(() => {
+                      // أكبر قيمة لحساب طول الأشرطة
+                      const maxValue = Math.max(
+                        ...breakdownData.components.map((c) => c.value),
+                        1
+                      );
+                      return breakdownData.components.map((c) => {
+                        const widthPct = Math.max(
+                          (c.value / maxValue) * 100,
+                          c.value > 0 ? 4 : 0
+                        );
+                        return (
+                          <div
+                            key={c.indicator_id}
+                            className="bg-white border border-indigo-100 rounded-md p-2"
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-medium text-gray-900 truncate">
+                                  {c.indicator_name}
+                                </div>
+                                <div className="text-[10px] text-gray-500">
+                                  {UNIT_TYPE_LABELS[c.unit_type] || c.unit_type}
+                                </div>
+                              </div>
+                              <div
+                                className="text-sm font-bold text-indigo-700 flex-shrink-0"
+                                dir="ltr"
+                              >
+                                {arNum(c.value)}
+                              </div>
+                            </div>
+                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="h-1.5 rounded-full bg-indigo-500 transition-all"
+                                style={{ width: `${widthPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {/* شجرة مساهمة الوحدات (قابلة للتوسيع) */}
               {breakdownData.breakdown.length > 0 ? (

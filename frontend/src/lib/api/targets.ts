@@ -9,8 +9,10 @@ import type { ApiResponse } from "@/types/api";
 // --- المستهدفات الهرمية ---
 
 export interface TargetInput {
+  name: string;
   scope_unit: number | null; // null => مستوى المؤسسة
-  indicator: number;
+  /** قائمة معرّفات المؤشّرات المُكوِّنة (واحد أو أكثر، كلها بنفس نوع الوحدة) */
+  indicator_ids: number[];
   year: number;
   target_value: number;
   notes?: string;

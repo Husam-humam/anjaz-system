@@ -1,5 +1,5 @@
 """
-اختبارات واجهات API للمستهدفات.
+اختبارات واجهات API للمستهدفات المركّبة.
 """
 import pytest
 from django.urls import reverse
@@ -21,7 +21,7 @@ from apps.targets.tests.factories import TargetFactory
 
 @pytest.mark.django_db
 class TestTargetAPI:
-    """اختبارات واجهة API للمستهدفات الهرمية"""
+    """اختبارات واجهة API للمستهدفات المركّبة الهرمية"""
 
     def test_list_targets(self, api_client):
         admin = StatisticsAdminFactory()
@@ -46,17 +46,45 @@ class TestTargetAPI:
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
         data = {
+            'name': 'مستهدف قسم',
             'scope_unit': qism.pk,
-            'indicator': indicator.pk,
+            'indicator_ids': [indicator.pk],
             'year': 2026,
             'target_value': 100.0,
             'notes': '',
         }
         response = api_client.post(url, data=data, format='json')
 
-        assert response.status_code == 201
+        assert response.status_code == 201, response.data
         assert response.data['target_value'] == 100.0
         assert response.data['scope_level'] == 'qism'
+        assert len(response.data['indicators']) == 1
+
+    def test_create_composite_target_via_api(self, api_client):
+        """إنشاء مستهدف مركّب من مؤشّرين عبر API"""
+        admin = StatisticsAdminFactory()
+        qism = SupervisedQismFactory()
+        ind1 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+        ind2 = IndicatorFactory(
+            unit_type="number", accumulation_type="sum"
+        )
+
+        api_client.force_authenticate(user=admin)
+        url = reverse('target-list')
+        data = {
+            'name': 'مستهدف مركّب',
+            'scope_unit': qism.pk,
+            'indicator_ids': [ind1.pk, ind2.pk],
+            'year': 2026,
+            'target_value': 200.0,
+        }
+        response = api_client.post(url, data=data, format='json')
+
+        assert response.status_code == 201, response.data
+        returned_ids = {ind['id'] for ind in response.data['indicators']}
+        assert returned_ids == {ind1.pk, ind2.pk}
 
     def test_create_institution_target(self, api_client):
         """إنشاء مستهدف على مستوى المؤسسة (scope_unit=None)"""
@@ -68,14 +96,15 @@ class TestTargetAPI:
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
         data = {
+            'name': 'مستهدف مؤسسي',
             'scope_unit': None,
-            'indicator': indicator.pk,
+            'indicator_ids': [indicator.pk],
             'year': 2026,
             'target_value': 1000.0,
         }
         response = api_client.post(url, data=data, format='json')
 
-        assert response.status_code == 201
+        assert response.status_code == 201, response.data
         assert response.data['scope_level'] == 'institution'
         assert response.data['scope_unit'] is None
 
@@ -90,14 +119,15 @@ class TestTargetAPI:
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
         data = {
+            'name': 'مستهدف دائرة',
             'scope_unit': daira.pk,
-            'indicator': indicator.pk,
+            'indicator_ids': [indicator.pk],
             'year': 2026,
             'target_value': 400.0,
         }
         response = api_client.post(url, data=data, format='json')
 
-        assert response.status_code == 201
+        assert response.status_code == 201, response.data
         assert response.data['scope_level'] == 'daira'
 
     def test_non_admin_cannot_create_target(self, api_client):
@@ -109,8 +139,9 @@ class TestTargetAPI:
         api_client.force_authenticate(user=planner)
         url = reverse('target-list')
         data = {
+            'name': 'مستهدف',
             'scope_unit': qism.pk,
-            'indicator': indicator.pk,
+            'indicator_ids': [indicator.pk],
             'year': 2026,
             'target_value': 100.0,
         }
@@ -125,8 +156,9 @@ class TestTargetAPI:
         api_client.force_authenticate(user=manager)
         url = reverse('target-list')
         data = {
+            'name': 'مستهدف',
             'scope_unit': qism.pk,
-            'indicator': indicator.pk,
+            'indicator_ids': [indicator.pk],
             'year': 2026,
             'target_value': 50.0,
         }
@@ -147,10 +179,14 @@ class TestTargetAPI:
             unit_type="number", accumulation_type="sum"
         )
 
-        TargetFactory(scope_unit=None, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=daira, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=mudiriya, indicator=indicator, year=2026)
-        TargetFactory(scope_unit=SupervisedQismFactory(), indicator=indicator, year=2026)
+        TargetFactory(scope_unit=None, indicators=[indicator], year=2026)
+        TargetFactory(scope_unit=daira, indicators=[indicator], year=2026)
+        TargetFactory(scope_unit=mudiriya, indicators=[indicator], year=2026)
+        TargetFactory(
+            scope_unit=SupervisedQismFactory(),
+            indicators=[indicator],
+            year=2026,
+        )
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-list')
@@ -167,7 +203,9 @@ class TestTargetAPI:
     def test_progress_action(self, api_client):
         """نقطة /targets/{id}/progress/ تُرجع حساب التقدم"""
         admin = StatisticsAdminFactory()
-        target = TargetFactory(scope_unit=SupervisedQismFactory(), target_value=200)
+        target = TargetFactory(
+            scope_unit=SupervisedQismFactory(), target_value=200,
+        )
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-progress', kwargs={'pk': target.pk})
@@ -191,7 +229,7 @@ class TestTargetAPI:
             unit_type="number", accumulation_type="sum"
         )
         target = TargetFactory(
-            scope_unit=mudiriya, indicator=indicator,
+            scope_unit=mudiriya, indicators=[indicator],
             year=2026, target_value=100,
         )
 
@@ -210,7 +248,9 @@ class TestTargetAPI:
     def test_breakdown_for_qism_target_is_empty(self, api_client):
         """مستهدف قسم يُرجع تفصيلاً فارغاً"""
         admin = StatisticsAdminFactory()
-        target = TargetFactory(scope_unit=SupervisedQismFactory())  # الافتراضي قسم
+        target = TargetFactory(
+            scope_unit=SupervisedQismFactory(),
+        )  # الافتراضي قسم
 
         api_client.force_authenticate(user=admin)
         url = reverse('target-breakdown', kwargs={'pk': target.pk})
