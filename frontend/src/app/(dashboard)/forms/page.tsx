@@ -397,9 +397,12 @@ export default function FormsPage() {
     setDetailDialogOpen(true);
   };
 
-  // الأدوار التي تستطيع إنشاء/تعديل القوالب
+  // الأدوار التي تستطيع إنشاء/تعديل/إرسال القوالب
   const canManageTemplates =
     user?.role === "planning_section" || user?.role === "statistics_admin";
+
+  // الاعتماد/الرفض حصرياً للأدمن (مدير الإحصاء)
+  const canApproveOrReject = user?.role === "statistics_admin";
 
   const templates = templatesData?.results || [];
   const pendingTemplatesCount = templates.filter(
@@ -709,8 +712,8 @@ export default function FormsPage() {
                             إرسال للاعتماد
                           </Button>
                         )}
-                        {/* اعتماد: متاح في حالة بانتظار الاعتماد */}
-                        {canManageTemplates &&
+                        {/* اعتماد: حصرياً للأدمن في حالة بانتظار الاعتماد */}
+                        {canApproveOrReject &&
                           template.status === "pending_approval" && (
                             <Button
                               variant="ghost"
@@ -722,8 +725,8 @@ export default function FormsPage() {
                               اعتماد
                             </Button>
                           )}
-                        {/* رفض: متاح في حالة بانتظار الاعتماد */}
-                        {canManageTemplates &&
+                        {/* رفض: حصرياً للأدمن في حالة بانتظار الاعتماد */}
+                        {canApproveOrReject &&
                           template.status === "pending_approval" && (
                             <Button
                               variant="ghost"

@@ -176,7 +176,7 @@ cd frontend && npm run test
 9. A `Qism` can never be a parent of another unit.
 10. Authorization scope:
     - Only `statistics_admin` can create users, open/close weeks, set targets, grant extensions.
-    - Template approval is allowed for both `statistics_admin` (full scope) and `planning_section` (within their `_planning_section_scope_qism_ids` scope).
+    - Template approval/rejection is EXCLUSIVE to `statistics_admin`. `planning_section` only **submits** templates for approval (status: draft → pending_approval).
     - Admin review (`admin-approve` / `admin-edit` / `admin-return`) is `statistics_admin` only.
     - Once one `statistics_admin` employee reviews a submission, **no other admin can review the same submission** — `admin_reviewed_at IS NULL` check + `select_for_update()`.
 11. Notifications must be created automatically on every status change event. Form template events must go through `NotificationService` (not raw `Notification.objects.create`) so they propagate over WebSocket.

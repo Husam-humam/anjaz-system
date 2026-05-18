@@ -198,29 +198,15 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         """
         اعتماد القالب: بانتظار الاعتماد → معتمد
-        مسموح لمدير قسم الإحصاء فقط
+        مسموح لمدير قسم الإحصاء حصرياً.
         """
-        # التحقق من الصلاحيات
-        if request.user.role not in ('statistics_admin', 'planning_section'):
+        if request.user.role != 'statistics_admin':
             return Response(
-                {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
+                {'detail': 'اعتماد الاستمارات صلاحيّة حصريّة لمدير قسم الإحصاء'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         template = self.get_object()
-
-        # التحقق من نطاق الصلاحية لقسم التخطيط (يدعم مخطط مديرية/دائرة/مركزي)
-        if request.user.role == 'planning_section':
-            from apps.submissions.services import (
-                _planning_section_scope_qism_ids,
-            )
-            scope_ids = _planning_section_scope_qism_ids(request.user)
-            # scope_ids = None يعني مخطط مركزي (نطاق كامل)
-            if scope_ids is not None and template.qism_id not in scope_ids:
-                return Response(
-                    {'detail': 'لا تملك صلاحية اعتماد هذه الاستمارة'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
 
         serializer = FormTemplateApproveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -244,28 +230,15 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         """
         رفض القالب: بانتظار الاعتماد → مرفوض
-        مسموح لمدير قسم الإحصاء فقط
+        مسموح لمدير قسم الإحصاء حصرياً.
         """
-        # التحقق من الصلاحيات
-        if request.user.role not in ('statistics_admin', 'planning_section'):
+        if request.user.role != 'statistics_admin':
             return Response(
-                {'detail': 'ليس لديك صلاحية للقيام بهذا الإجراء'},
+                {'detail': 'رفض الاستمارات صلاحيّة حصريّة لمدير قسم الإحصاء'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         template = self.get_object()
-
-        # التحقق من نطاق الصلاحية لقسم التخطيط (يدعم مخطط مديرية/دائرة/مركزي)
-        if request.user.role == 'planning_section':
-            from apps.submissions.services import (
-                _planning_section_scope_qism_ids,
-            )
-            scope_ids = _planning_section_scope_qism_ids(request.user)
-            if scope_ids is not None and template.qism_id not in scope_ids:
-                return Response(
-                    {'detail': 'لا تملك صلاحية رفض هذه الاستمارة'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
 
         serializer = FormTemplateRejectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
