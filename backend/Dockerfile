@@ -23,6 +23,14 @@ USER appuser
 
 COPY . .
 
+# جمع ملفّات الـ static (لـ admin css + أي assets) — WhiteNoise يقدّمها.
+# نُمرّر SECRET_KEY وهمي لأن collectstatic يقرأ الإعدادات.
+RUN SECRET_KEY=build-time-only \
+    DEBUG=False \
+    ALLOWED_HOSTS=localhost \
+    DB_HOST=localhost DB_NAME=x DB_USER=x DB_PASSWORD=x \
+    python manage.py collectstatic --noinput || true
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
