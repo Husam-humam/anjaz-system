@@ -36,13 +36,14 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         return FormTemplateSerializer
 
     def get_queryset(self):
+        from django.db.models import Q
         queryset = FormTemplate.objects.select_related(
             'qism', 'qism__parent', 'created_by', 'approved_by', 'rejected_by'
         ).prefetch_related(
             'items__indicator'
         ).order_by('-created_at')
 
-        # تصفية حسب نطاق الرؤية للمستخدم (view scope)
+        # 1) تصفية حسب نطاق الرؤية (view scope)
         user = self.request.user
         if user.role == 'statistics_admin':
             pass  # نطاق كامل
@@ -59,6 +60,12 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(qism_id__in=scope_ids)
         else:
             return queryset.none()
+
+        # 2) المسوّدات (DRAFT) خاصّة بمُنشئها فقط — لا تظهر لأحد آخر
+        # حتى يُرسلها صاحبها للاعتماد (تُصبح PENDING_APPROVAL).
+        queryset = queryset.filter(
+            ~Q(status=FormTemplate.Status.DRAFT) | Q(created_by=user)
+        )
 
         # ─── فلاتر هرمية إضافية ───
         # فلتر بالمديرية (parent مباشر للقسم)
