@@ -16,10 +16,13 @@ services:
   backend:
     # في الإنتاج: نستخدم Dockerfile CMD (gunicorn) — لا runserver
     command: !reset null
-    # نُلغي تجاوزات التطوير لـ external system (نريد قيم .env تسود)
+    # نُلغي تجاوزات التطوير لـ external system (نريد قيم .env تسود).
+    # !reset null على المفتاح الفردي يحذفه من الـ mapping المُورَّث.
     environment:
       DB_HOST: db
       REDIS_URL: redis://redis:6379/0
+      EXTERNAL_ORG_API_URL: !reset null
+      EXTERNAL_ORG_HOST_HEADER: !reset null
     # لا حاجة لـ extra_hosts (لا نصل لـ host في الإنتاج)
     extra_hosts: !reset []
     # لا نُركّب الكود من الـ host في الإنتاج (الـ image يحوي ما يلزم)
