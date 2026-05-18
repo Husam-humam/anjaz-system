@@ -7,8 +7,10 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-your-db-password}
     ports:
       - "5432:5432"
+    # postgres 18+ يتوقّع الـ mount على مستوى /var/lib/postgresql (وليس /data)
+    # ليُدير subdirectories خاصّة بالنسخة الكبرى (لدعم pg_upgrade --link).
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-anjaz_user} -d ${DB_NAME:-anjaz_db}"]
       interval: 10s
